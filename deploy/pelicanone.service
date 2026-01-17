@@ -1,0 +1,13 @@
+[Unit]
+Description=PelicanOneBot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/pelicanone
+ExecStart=/usr/bin/docker compose up
+ExecStop=/usr/bin/docker compose down
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
