@@ -1,0 +1,58 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: pelican
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  bot:
+    build: .
+    command: python -m app.bot.main
+    env_file: .env
+    volumes:
+      - ./data:/data
+    depends_on:
+      - postgres
+      - redis
+
+  api:
+    build: .
+    command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+
+  worker:
+    build: .
+    command: python -m app.worker.worker
+    env_file: .env
+    volumes:
+      - ./data:/data
+    depends_on:
+      - postgres
+      - redis
+
+  migrations:
+    build: .
+    command: alembic upgrade head
+    env_file: .env
+    depends_on:
+      - postgres
+
+volumes:
+  data:
