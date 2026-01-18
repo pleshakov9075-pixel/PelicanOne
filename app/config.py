@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import AliasChoices, Field
 
 
 class Settings(BaseSettings):
@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     genapi_token: str = Field(alias="GENAPI_TOKEN")
     api_public_base_url: str = Field(
         alias="API_PUBLIC_BASE_URL",
+        validation_alias=AliasChoices("API_PUBLIC_BASE_URL", "api_public_base_url"),
         default="http://localhost:8000",
     )
     yookassa_shop_id: str = Field(alias="YOOKASSA_SHOP_ID")
