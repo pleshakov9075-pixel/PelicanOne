@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from aiogram import Bot
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from sqlalchemy import select
 from structlog import get_logger
@@ -33,7 +34,10 @@ async def _process(job_id: int) -> None:
         user = await session.get(User, job.user_id)
         if not user:
             return
-    bot = Bot(token=settings.bot_token, parse_mode=ParseMode.HTML)
+    bot = Bot(
+        token=settings.bot_token,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
     if job.section == Section.text:
         text = job.result.get("message", "Готово")
         parts = split_text(text)
@@ -53,7 +57,10 @@ async def _broadcast(message: str) -> None:
     async with async_session_factory() as session:
         result = await session.execute(select(User).where(User.is_active.is_(True)))
         users = result.scalars().all()
-    bot = Bot(token=settings.bot_token, parse_mode=ParseMode.HTML)
+    bot = Bot(
+        token=settings.bot_token,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
     for user in users:
         try:
             await bot.send_message(user.telegram_id, message)
