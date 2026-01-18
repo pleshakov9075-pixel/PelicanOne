@@ -67,6 +67,7 @@ class Job(Base):
     draft_id: Mapped[int | None] = mapped_column(ForeignKey("drafts.id"), nullable=True)
     section: Mapped[Section] = mapped_column(Enum(Section, name="section"))
     status: Mapped[JobStatus] = mapped_column(Enum(JobStatus, name="job_status"), default=JobStatus.queued)
+    rq_job_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     price_rub: Mapped[int] = mapped_column(Integer, default=0)
     payload: Mapped[dict] = mapped_column(JSONB, default=dict)
     result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
