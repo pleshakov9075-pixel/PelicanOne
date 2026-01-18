@@ -12,6 +12,8 @@ from app.crud import update_job_status
 from app.db import async_session_factory
 from app.models import Job, JobStatus, Section, User
 from app.bot.keyboards import summarize_button
+from app.crud import update_job_delivery_failure
+from app.services.delivery import deliver_result
 from app.text_utils import split_text
 
 logger = get_logger()
@@ -34,18 +36,26 @@ async def _process(job_id: int) -> None:
         user = await session.get(User, job.user_id)
         if not user:
             return
+        logger.info("task_result_ready", task_id=job.id, user_id=job.user_id, status=job.status.value)
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-    if job.section == Section.text:
-        text = job.result.get("message", "Готово")
-        parts = split_text(text)
-        for part in parts:
-            await bot.send_message(user.telegram_id, part)
-        await bot.send_message(user.telegram_id, "Нужен краткий вариант?", reply_markup=summarize_button())
-    else:
-        await bot.send_message(user.telegram_id, "✅ Готово. Результат отправлен документом.")
+    delivered = True
+    try:
+        if job.section == Section.text:
+            text = job.result.get("message", "Готово")
+            parts = split_text(text)
+            for part in parts:
+                await bot.send_message(user.telegram_id, part)
+            await bot.send_message(user.telegram_id, "Нужен краткий вариант?", reply_markup=summarize_button())
+        else:
+            delivered = await deliver_result(bot, user, job)
+    except Exception as exc:
+        logger.exception("deliver_text_failed", task_id=job.id, error=str(exc))
+        delivered = False
+    async with async_session_factory() as session:
+        await update_job_delivery_failure(session, job.id, not delivered)
     await bot.session.close()
 
 
