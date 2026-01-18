@@ -6,7 +6,7 @@ import uuid
 from aiogram import F, Router
 from aiogram.enums import ContentType
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, ErrorEvent, InlineKeyboardMarkup, Message
 from aiogram.fsm.context import FSMContext
 import httpx
 from sqlalchemy import select
@@ -54,6 +54,35 @@ from app.worker.queue import enqueue_broadcast
 logger = get_logger()
 router = Router()
 broadcast_cache: dict[int, str] = {}
+
+
+@router.errors()
+async def handle_handler_error(event: ErrorEvent) -> bool:
+    update = event.update
+    user_id = None
+    if update.message and update.message.from_user:
+        user_id = update.message.from_user.id
+    elif update.callback_query and update.callback_query.from_user:
+        user_id = update.callback_query.from_user.id
+    logger.exception(
+        "handler_exception",
+        error=str(event.exception),
+        update_type=getattr(update, "event_type", None),
+        user_id=user_id,
+    )
+    try:
+        if update.message:
+            await update.message.answer(
+                "Произошла ошибка. Попробуйте ещё раз.",
+                reply_markup=keyboards.main_reply_keyboard(),
+            )
+            await update.message.answer(MAIN_PROMPT, reply_markup=keyboards.main_menu())
+        elif update.callback_query and update.callback_query.message:
+            await update.callback_query.answer("Произошла ошибка. Попробуйте ещё раз.", show_alert=True)
+            await update.callback_query.message.answer(MAIN_PROMPT, reply_markup=keyboards.main_menu())
+    except Exception:
+        logger.exception("handler_exception_reply_failed")
+    return True
 
 
 MAIN_PROMPT = """
@@ -199,11 +228,11 @@ async def handle_task_creation(callback: CallbackQuery, state: FSMContext, reque
     try:
         await callback.message.edit_text(
             f"{section_title(draft.section)}\n\n{render_price_block(price_rub, updated_balance)}\n\n"
-            f"✅ Задача создана: #{task_id}\njob_id: {job_id}",
+            f"✅ Задача поставлена в очередь: #{task_id}\njob_id: {job_id}\nСтатус: queued",
             reply_markup=keyboards.confirm_buttons(False),
         )
     except TelegramBadRequest:
-        await callback.message.answer(f"✅ Задача создана: #{task_id}\njob_id: {job_id}")
+        await callback.message.answer(f"✅ Задача поставлена в очередь: #{task_id}\njob_id: {job_id}\nСтатус: queued")
     await set_fsm_context(
         state,
         user_id=callback.from_user.id,
@@ -521,7 +550,7 @@ async def help_command(message: Message, state: FSMContext) -> None:
     await message.answer(HELP_TEXT, reply_markup=keyboards.main_reply_keyboard())
 
 
-@router.message(F.text == "🏠 Главное меню")
+@router.message(F.text == "🏠 Меню")
 async def menu_button(message: Message, state: FSMContext) -> None:
     request_id = uuid.uuid4().hex
     log_handler_entry("menu_button", message.from_user.id, request_id=request_id, payload=message.text)

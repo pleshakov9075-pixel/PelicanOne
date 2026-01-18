@@ -8,6 +8,7 @@ from structlog import get_logger
 
 from app.bot.handlers import router
 from app.config import settings
+from app.db import verify_database_connection
 
 logger = get_logger()
 
@@ -19,6 +20,7 @@ def create_dispatcher() -> Dispatcher:
 
 
 async def main() -> None:
+    await verify_database_connection()
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
