@@ -58,17 +58,34 @@ broadcast_cache: dict[int, str] = {}
 
 @router.errors()
 async def handle_handler_error(event: ErrorEvent) -> bool:
+    request_id = uuid.uuid4().hex
     update = event.update
     user_id = None
     if update.message and update.message.from_user:
         user_id = update.message.from_user.id
     elif update.callback_query and update.callback_query.from_user:
         user_id = update.callback_query.from_user.id
+    exc = event.exception
+    if isinstance(exc, TelegramBadRequest) and "message is not modified" in str(exc).lower():
+        logger.debug(
+            "handler_exception_message_not_modified",
+            error=str(exc),
+            update_type=getattr(update, "event_type", None),
+            user_id=user_id,
+            request_id=request_id,
+        )
+        try:
+            if update.callback_query:
+                await update.callback_query.answer()
+        except Exception:
+            logger.debug("handler_exception_reply_failed", request_id=request_id)
+        return True
     logger.exception(
         "handler_exception",
-        error=str(event.exception),
+        error=str(exc),
         update_type=getattr(update, "event_type", None),
         user_id=user_id,
+        request_id=request_id,
     )
     try:
         if update.message:
@@ -81,7 +98,7 @@ async def handle_handler_error(event: ErrorEvent) -> bool:
             await update.callback_query.answer("Произошла ошибка. Попробуйте ещё раз.", show_alert=True)
             await update.callback_query.message.answer(MAIN_PROMPT, reply_markup=keyboards.main_menu())
     except Exception:
-        logger.exception("handler_exception_reply_failed")
+        logger.exception("handler_exception_reply_failed", request_id=request_id)
     return True
 
 
@@ -163,7 +180,8 @@ async def handle_task_creation(callback: CallbackQuery, state: FSMContext, reque
             return
         price_rub = await calculate_price(session, user, draft)
         if user.balance_rub < price_rub:
-            await callback.message.edit_text(
+            await safe_edit_message(
+                callback.message,
                 f"Баланс недостаточен.\n\n{render_price_block(price_rub, user.balance_rub)}\n\nПополните баланс.",
                 reply_markup=keyboards.balance_options(),
             )
@@ -203,6 +221,7 @@ async def handle_task_creation(callback: CallbackQuery, state: FSMContext, reque
                 "Не удалось создать задачу. Попробуйте ещё раз.",
                 reply_markup=keyboards.retry_create_button(),
             )
+            await callback.answer()
             return
         except httpx.HTTPError:
             logger.exception("action_start_failed")
@@ -211,6 +230,7 @@ async def handle_task_creation(callback: CallbackQuery, state: FSMContext, reque
                 "Не удалось создать задачу. Попробуйте ещё раз.",
                 reply_markup=keyboards.retry_create_button(),
             )
+            await callback.answer()
             return
         await session.refresh(user)
         await clear_draft(session, draft)
@@ -225,13 +245,13 @@ async def handle_task_creation(callback: CallbackQuery, state: FSMContext, reque
             job_id=job_id,
             request_id=request_id,
         )
-    try:
-        await callback.message.edit_text(
-            f"{section_title(draft.section)}\n\n{render_price_block(price_rub, updated_balance)}\n\n"
-            f"✅ Задача поставлена в очередь: #{task_id}\njob_id: {job_id}\nСтатус: queued",
-            reply_markup=keyboards.confirm_buttons(False),
-        )
-    except TelegramBadRequest:
+    updated = await safe_edit_message(
+        callback.message,
+        f"{section_title(draft.section)}\n\n{render_price_block(price_rub, updated_balance)}\n\n"
+        f"✅ Задача поставлена в очередь: #{task_id}\njob_id: {job_id}\nСтатус: queued",
+        reply_markup=keyboards.confirm_buttons(False),
+    )
+    if not updated:
         await callback.message.answer(f"✅ Задача поставлена в очередь: #{task_id}\njob_id: {job_id}\nСтатус: queued")
     await set_fsm_context(
         state,
@@ -459,6 +479,36 @@ def render_confirmation_text(draft: Draft, price_rub: int, balance_rub: int) -> 
     return "\n".join(lines)
 
 
+def _serialize_markup(markup: InlineKeyboardMarkup | None) -> object | None:
+    if markup is None:
+        return None
+    if hasattr(markup, "model_dump"):
+        return markup.model_dump()
+    if hasattr(markup, "to_python"):
+        return markup.to_python()
+    return markup
+
+
+async def safe_edit_message(
+    message: Message,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> bool:
+    if message.text == text:
+        current_markup = _serialize_markup(message.reply_markup)
+        target_markup = _serialize_markup(reply_markup)
+        if current_markup == target_markup:
+            return False
+    try:
+        await message.edit_text(text, reply_markup=reply_markup)
+        return True
+    except TelegramBadRequest as exc:
+        if "message is not modified" in str(exc).lower():
+            logger.debug("message_not_modified", message_id=message.message_id)
+            return False
+        raise
+
+
 def split_payload_and_options(draft: Draft) -> tuple[dict, dict]:
     payload = draft.payload or {}
     if draft.section == Section.text:
@@ -497,6 +547,30 @@ def split_payload_and_options(draft: Draft) -> tuple[dict, dict]:
         options = {"quality": payload.get("quality")}
         return content, {k: v for k, v in options.items() if v is not None}
     return payload, {}
+
+
+async def render_section_menu(
+    section: Section,
+    user: User,
+    draft: Draft,
+    session: AsyncSession | None = None,
+) -> tuple[str, InlineKeyboardMarkup]:
+    text = render_section_prompt(section, user, draft)
+    payload = draft.payload or {}
+    if section == Section.audio and payload.get("mode") == "tts":
+        if session is None:
+            async with async_session_factory() as voice_session:
+                voices = await load_voices(voice_session)
+        else:
+            voices = await load_voices(session)
+        markup = keyboards.audio_tts_options(voices, payload.get("voice_id"))
+    elif section == Section.audio and payload.get("mode") == "transcribe":
+        markup = keyboards.audio_transcribe_options(payload.get("transcribe_mode"))
+    elif section == Section.balance:
+        markup = keyboards.balance_options()
+    else:
+        markup = action_keyboard_for_draft(draft)
+    return text, markup
 
 
 @router.message(F.text == "/start")
@@ -707,7 +781,7 @@ async def task_command(message: Message, state: FSMContext) -> None:
 async def back_to_menu(callback: CallbackQuery, state: FSMContext) -> None:
     request_id = uuid.uuid4().hex
     log_handler_entry("back_to_menu", callback.from_user.id, request_id=request_id, payload=callback.data)
-    await callback.message.edit_text(MAIN_PROMPT, reply_markup=keyboards.main_menu())
+    await safe_edit_message(callback.message, MAIN_PROMPT, reply_markup=keyboards.main_menu())
     await set_fsm_context(
         state,
         user_id=callback.from_user.id,
@@ -751,14 +825,8 @@ async def open_section(callback: CallbackQuery, state: FSMContext) -> None:
         input_type="callback",
         mode=section.value,
     )
-    text = render_section_prompt(section, user, draft)
-    if section == Section.audio and draft.payload.get("mode") == "tts":
-        async with async_session_factory() as session:
-            voices = await load_voices(session)
-        markup = keyboards.audio_tts_options(voices, draft.payload.get("voice_id"))
-    else:
-        markup = action_keyboard_for_draft(draft) if section != Section.balance else keyboards.balance_options()
-    await callback.message.edit_text(text, reply_markup=markup)
+    text, markup = await render_section_menu(section, user, draft, session)
+    await safe_edit_message(callback.message, text, reply_markup=markup)
     await callback.answer()
 
 
@@ -878,10 +946,8 @@ async def image_mode_upscale(callback: CallbackQuery, state: FSMContext) -> None
         input_type="callback",
         mode="image:upscale",
     )
-    await callback.message.edit_text(
-        render_section_prompt(Section.image, user, draft),
-        reply_markup=action_keyboard_for_draft(draft),
-    )
+    text, markup = await render_section_menu(Section.image, user, draft, session)
+    await safe_edit_message(callback.message, text, reply_markup=markup)
     await callback.answer()
 
 
@@ -935,10 +1001,8 @@ async def video_mode_upscale(callback: CallbackQuery, state: FSMContext) -> None
         input_type="callback",
         mode="video:upscale",
     )
-    await callback.message.edit_text(
-        render_section_prompt(Section.video, user, draft),
-        reply_markup=action_keyboard_for_draft(draft),
-    )
+    text, markup = await render_section_menu(Section.video, user, draft, session)
+    await safe_edit_message(callback.message, text, reply_markup=markup)
     await callback.answer()
 
 
@@ -986,22 +1050,8 @@ async def audio_mode(callback: CallbackQuery, state: FSMContext) -> None:
         payload.setdefault("input_type", "callback")
         draft = await update_draft_payload(session, draft, payload)
         await activate_draft(session, user.id, draft.id)
-        if mode == "transcribe":
-            await callback.message.edit_text(
-                render_section_prompt(Section.audio, user, draft),
-                reply_markup=keyboards.audio_transcribe_options(payload.get("transcribe_mode")),
-            )
-        elif mode == "music":
-            await callback.message.edit_text(
-                render_section_prompt(Section.audio, user, draft),
-                reply_markup=action_keyboard_for_draft(draft),
-            )
-        else:
-            voices = await load_voices(session)
-            await callback.message.edit_text(
-                render_section_prompt(Section.audio, user, draft),
-                reply_markup=keyboards.audio_tts_options(voices, payload.get("voice_id")),
-            )
+        text, markup = await render_section_menu(Section.audio, user, draft, session)
+        await safe_edit_message(callback.message, text, reply_markup=markup)
     await set_fsm_context(
         state,
         user_id=callback.from_user.id,
@@ -1064,14 +1114,15 @@ async def action_confirm(callback: CallbackQuery, state: FSMContext) -> None:
             return
         price_rub = await calculate_price(session, user, draft)
         if user.balance_rub < price_rub:
-            await callback.message.edit_text(
+            await safe_edit_message(
+                callback.message,
                 f"Баланс недостаточен.\n\n{render_price_block(price_rub, user.balance_rub)}\n\nПополните баланс.",
                 reply_markup=keyboards.balance_options(),
             )
             await callback.answer()
             return
         confirmation_text = render_confirmation_text(draft, price_rub, user.balance_rub)
-        await callback.message.edit_text(confirmation_text, reply_markup=keyboards.confirm_buttons(True))
+        await safe_edit_message(callback.message, confirmation_text, reply_markup=keyboards.confirm_buttons(True))
     await set_fsm_context(
         state,
         user_id=callback.from_user.id,
@@ -1103,7 +1154,7 @@ async def jobs_list(callback: CallbackQuery, state: FSMContext) -> None:
         jobs = await list_recent_jobs(session, user.id)
     if not jobs:
         text = "📦 Мои задачи\n\nПока нет задач."
-        await callback.message.edit_text(text, reply_markup=keyboards.back_and_home())
+        await safe_edit_message(callback.message, text, reply_markup=keyboards.back_and_home())
         await callback.answer()
         return
     lines = ["📦 Мои задачи"]
@@ -1111,7 +1162,11 @@ async def jobs_list(callback: CallbackQuery, state: FSMContext) -> None:
         lines.append(
             f"• #{job.id} • {section_title(job.section)} • {job.created_at:%Y-%m-%d %H:%M} • {job_status_label(job.status)}"
         )
-    await callback.message.edit_text("\n".join(lines), reply_markup=keyboards.job_list_buttons([job.id for job in jobs]))
+    await safe_edit_message(
+        callback.message,
+        "\n".join(lines),
+        reply_markup=keyboards.job_list_buttons([job.id for job in jobs]),
+    )
     await set_fsm_context(
         state,
         user_id=callback.from_user.id,
@@ -1129,7 +1184,8 @@ async def balance_topup(callback: CallbackQuery, state: FSMContext) -> None:
     log_handler_entry("balance_topup", callback.from_user.id, request_id=request_id, payload=callback.data, amount=amount)
     client = PaymentsClient()
     link = await client.create_payment(amount, "Пополнение баланса", "https://t.me/")
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         f"Для пополнения перейдите по ссылке:\n{link.url}",
         reply_markup=keyboards.back_and_home(),
     )
@@ -1210,7 +1266,8 @@ async def jobs_open(callback: CallbackQuery, state: FSMContext) -> None:
             return
     status_text = job_status_label(job.status)
     extra = " (доставка не удалась)" if job.delivery_failed else ""
-    await callback.message.edit_text(
+    await safe_edit_message(
+        callback.message,
         f"#{job.id} • {section_title(job.section)}\n"
         f"Статус: {status_text}{extra}\n"
         f"Стоимость: {job.price_rub} ₽\n"
@@ -1282,25 +1339,17 @@ async def update_draft_option(callback: CallbackQuery, section: Section, key: st
         )
         draft = await get_or_create_draft(session, user.id, section)
         payload = draft.payload or {}
+        if payload.get(key) == value:
+            await callback.answer("Уже выбрано ✅")
+            return
         payload[key] = value
         payload.setdefault("awaiting_input", True)
         payload.setdefault("source_message_id", callback.message.message_id if callback.message else None)
         payload.setdefault("input_type", "callback")
         draft = await update_draft_payload(session, draft, payload)
         await activate_draft(session, user.id, draft.id)
-        text = render_section_prompt(section, user, draft)
-        if section == Section.audio:
-            mode = payload.get("mode")
-            if mode == "transcribe":
-                markup = keyboards.audio_transcribe_options(payload.get("transcribe_mode"))
-            elif mode == "tts":
-                voices = await load_voices(session)
-                markup = keyboards.audio_tts_options(voices, payload.get("voice_id"))
-            else:
-                markup = action_keyboard_for_draft(draft)
-        else:
-            markup = action_keyboard_for_draft(draft)
-        await callback.message.edit_text(text, reply_markup=markup)
+        text, markup = await render_section_menu(section, user, draft, session)
+        await safe_edit_message(callback.message, text, reply_markup=markup)
     await set_fsm_context(
         state,
         user_id=callback.from_user.id,
@@ -1398,7 +1447,7 @@ async def action_cancel(callback: CallbackQuery, state: FSMContext) -> None:
         input_type="callback",
         mode="cancel",
     )
-    await callback.message.edit_text("Отменено.", reply_markup=keyboards.main_menu())
+    await safe_edit_message(callback.message, "Отменено.", reply_markup=keyboards.main_menu())
     await callback.message.answer("Главное меню", reply_markup=keyboards.main_reply_keyboard())
     await callback.answer()
 
