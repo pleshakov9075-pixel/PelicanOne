@@ -22,6 +22,14 @@ docker compose up --build -d
 docker compose run --rm migrations
 ```
 
+## Smoke test
+
+```bash
+docker compose run --rm migrations alembic current
+docker compose exec postgres psql -U postgres -d pelican -c "select count(*) from prices;"
+curl -sS -i http://127.0.0.1:8000/docs
+```
+
 ## Systemd автозапуск
 
 ```bash
