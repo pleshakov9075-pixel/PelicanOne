@@ -16,9 +16,12 @@ from structlog import get_logger
 from app.bot import keyboards
 from app.config import settings
 from app.crud import (
+    activate_draft,
     add_balance,
     add_balance_transaction,
     clear_draft,
+    deactivate_other_drafts,
+    find_active_draft,
     get_or_create_draft,
     get_or_create_user,
     get_price,
@@ -63,7 +66,7 @@ HELP_TEXT = """
 • Показывать баланс и историю задач.
 
 Примеры:
-• Отправьте текст и нажмите «Запустить».
+• Отправьте текст и нажмите «Подтвердить».
 • Перейдите в «🖼 Изображения» и выберите параметры.
 
 Команды:
@@ -227,6 +230,32 @@ def section_title(section: Section) -> str:
     return titles.get(section, "")
 
 
+def render_section_prompt(section: Section, user: User, draft: Draft | None = None) -> str:
+    payload = draft.payload if draft else {}
+    if section == Section.text:
+        return f"{section_title(section)}\n\nВведите текст ниже."
+    if section == Section.image:
+        if payload.get("mode") == "upscale":
+            return f"{section_title(section)}\n\nПрикрепите изображение для повышения качества."
+        return f"{section_title(section)}\n\nВведите текст. Если прикрепите изображение — будет редактирование."
+    if section == Section.video:
+        if payload.get("mode") == "upscale":
+            return f"{section_title(section)}\n\nПрикрепите видео документом для повышения качества."
+        return f"{section_title(section)}\n\nВведите текст. Можно прикрепить изображение."
+    if section == Section.audio:
+        mode = payload.get("mode")
+        if mode == "transcribe":
+            return f"{section_title(section)}\n\nПрикрепите mp3 документом и выберите формат результата."
+        if mode == "music":
+            return f"{section_title(section)}\n\nВведите тему или текст для музыки."
+        if mode == "tts":
+            return f"{section_title(section)}\n\nВведите текст и выберите голос ниже."
+        return f"{section_title(section)}\n\nВыберите режим работы."
+    if section == Section.three_d:
+        return f"{section_title(section)}\n\nПрикрепите изображение для 3D."
+    return f"{section_title(section)}\n\nБаланс: {user.balance_rub} ₽"
+
+
 async def load_prices(session: AsyncSession, codes: list[str]) -> dict[str, object]:
     prices = {}
     for code in codes:
@@ -236,17 +265,17 @@ async def load_prices(session: AsyncSession, codes: list[str]) -> dict[str, obje
     return prices
 
 
-async def find_active_draft(session: AsyncSession, user_id: int) -> Draft | None:
-    result = await session.execute(select(Draft).where(Draft.user_id == user_id))
-    drafts = result.scalars().all()
-    active = [draft for draft in drafts if draft.payload.get("awaiting_input")]
-    if len(active) == 1:
-        return active[0]
-    return None
-
-
 def render_price_block(price_rub: int, balance_rub: int) -> str:
     return f"Стоимость: {price_rub} ₽\nБаланс: {balance_rub} ₽"
+
+
+def job_status_label(status: JobStatus) -> str:
+    return {
+        JobStatus.queued: "queued",
+        JobStatus.processing: "started",
+        JobStatus.done: "finished",
+        JobStatus.error: "failed",
+    }[status]
 
 
 def validate_draft(draft: Draft) -> tuple[bool, str]:
@@ -317,28 +346,88 @@ def action_keyboard_for_draft(draft: Draft) -> InlineKeyboardMarkup:
     payload = draft.payload or {}
     is_valid, _ = validate_draft(draft)
     if draft.section == Section.text:
-        return keyboards.confirm_buttons(is_valid)
+        return keyboards.review_buttons(is_valid)
     if draft.section == Section.image:
         if payload.get("mode") == "upscale":
-            return keyboards.image_upscale_options(is_valid)
+            return keyboards.image_upscale_options(payload.get("upscale"), is_valid)
         return keyboards.image_options(payload.get("size"), payload.get("quality"), is_valid)
     if draft.section == Section.video:
         if payload.get("mode") == "upscale":
-            return keyboards.video_upscale_options(is_valid)
-        return keyboards.video_options(is_valid)
+            return keyboards.video_upscale_options(payload.get("upscale"), is_valid)
+        return keyboards.video_options(payload.get("size"), payload.get("duration"), payload.get("with_audio"), is_valid)
     if draft.section == Section.audio:
-        return keyboards.confirm_buttons(is_valid)
+        mode = payload.get("mode")
+        if not mode:
+            return keyboards.audio_options(None)
+        if mode == "transcribe":
+            return keyboards.audio_transcribe_options(payload.get("transcribe_mode"))
+        return keyboards.review_buttons(is_valid)
     if draft.section == Section.three_d:
-        return keyboards.three_d_options(is_valid)
-    return keyboards.confirm_buttons(is_valid)
+        return keyboards.three_d_options(payload.get("quality"), is_valid)
+    return keyboards.review_buttons(is_valid)
 
 
 def render_action_text(draft: Draft, price_rub: int, balance_rub: int) -> str:
     base = f"{section_title(draft.section)}\n\n{render_price_block(price_rub, balance_rub)}"
     is_valid, _ = validate_draft(draft)
     if is_valid:
-        return f"{base}\n\nНажмите «Запустить»."
+        return f"{base}\n\nНажмите «Подтвердить»."
     return f"{base}\n\nВыберите параметры для запуска."
+
+
+def _truncate_text(value: str, limit: int = 500) -> str:
+    if len(value) <= limit:
+        return value
+    return f"{value[:limit]}…"
+
+
+def render_confirmation_text(draft: Draft, price_rub: int, balance_rub: int) -> str:
+    payload = draft.payload or {}
+    lines = [section_title(draft.section), "", "Проверьте параметры:"]
+    if draft.section == Section.text:
+        prompt = payload.get("prompt") or ""
+        lines.append(f"• Текст: {_truncate_text(prompt)}")
+    elif draft.section == Section.image:
+        if payload.get("mode") == "upscale":
+            lines.append("• Режим: апскейл")
+            lines.append(f"• Коэффициент: x{payload.get('upscale') or '—'}")
+        else:
+            lines.append(f"• Размер: {payload.get('size') or '—'}")
+            lines.append(f"• Качество: {payload.get('quality') or '—'}")
+        lines.append("• Файл: прикреплён" if payload.get("file_id") else "• Файл: нет")
+        if payload.get("prompt"):
+            lines.append(f"• Текст: {_truncate_text(payload.get('prompt') or '')}")
+    elif draft.section == Section.video:
+        if payload.get("mode") == "upscale":
+            lines.append("• Режим: апскейл")
+            lines.append(f"• Коэффициент: x{payload.get('upscale') or '—'}")
+        else:
+            lines.append(f"• Формат: {payload.get('size') or '—'}")
+            lines.append(f"• Длительность: {payload.get('duration') or '—'} сек")
+            audio_flag = payload.get("with_audio")
+            lines.append(f"• Звук: {'да' if audio_flag else 'нет'}" if audio_flag is not None else "• Звук: —")
+        lines.append("• Файл: прикреплён" if payload.get("file_id") else "• Файл: нет")
+        if payload.get("prompt"):
+            lines.append(f"• Текст: {_truncate_text(payload.get('prompt') or '')}")
+    elif draft.section == Section.audio:
+        mode = payload.get("mode") or "—"
+        lines.append(f"• Режим: {mode}")
+        if mode == "transcribe":
+            lines.append(f"• Формат: {payload.get('transcribe_mode') or '—'}")
+            lines.append("• Файл: прикреплён" if payload.get("file_id") else "• Файл: нет")
+        elif mode == "tts":
+            lines.append(f"• Голос: {payload.get('voice_id') or '—'}")
+            lines.append(f"• Текст: {_truncate_text(payload.get('prompt') or '')}")
+        else:
+            lines.append(f"• Текст: {_truncate_text(payload.get('prompt') or '')}")
+    elif draft.section == Section.three_d:
+        lines.append(f"• Качество: {payload.get('quality') or '—'}")
+        lines.append("• Файл: прикреплён" if payload.get("file_id") else "• Файл: нет")
+    lines.append("")
+    lines.append(render_price_block(price_rub, balance_rub))
+    lines.append("")
+    lines.append("Нажмите «Запустить», чтобы поставить задачу в очередь.")
+    return "\n".join(lines)
 
 
 def split_payload_and_options(draft: Draft) -> tuple[dict, dict]:
@@ -538,14 +627,10 @@ async def tasks_command(message: Message, state: FSMContext) -> None:
         return
     lines = ["📦 Мои задачи"]
     for job in jobs:
-        status_text = {
-            JobStatus.queued: "🕒 В очереди",
-            JobStatus.processing: "⚙️ Обрабатывается",
-            JobStatus.done: "✅ Готово",
-            JobStatus.error: "❌ Ошибка",
-        }[job.status]
-        lines.append(f"• #{job.id} • {section_title(job.section)} • {status_text}")
-    await message.answer("\n".join(lines), reply_markup=keyboards.job_list_buttons(jobs[0].id))
+        lines.append(
+            f"• #{job.id} • {section_title(job.section)} • {job.created_at:%Y-%m-%d %H:%M} • {job_status_label(job.status)}"
+        )
+    await message.answer("\n".join(lines), reply_markup=keyboards.job_list_buttons([job.id for job in jobs]))
 
 
 @router.message(F.text.regexp(r"^/task\\s+\\d+"))
@@ -571,14 +656,15 @@ async def task_command(message: Message, state: FSMContext) -> None:
         input_type="command",
         mode="task",
     )
-    status_text = {
-        JobStatus.queued: "🕒 В очереди",
-        JobStatus.processing: "⚙️ Обрабатывается",
-        JobStatus.done: "✅ Готово",
-        JobStatus.error: "❌ Ошибка",
-    }[job.status]
+    status_text = job_status_label(job.status)
     extra = " (доставка не удалась)" if job.delivery_failed else ""
-    await message.answer(f"Статус задачи #{job.id}: {status_text}{extra}", reply_markup=keyboards.back_and_home())
+    await message.answer(
+        f"#{job.id} • {section_title(job.section)}\n"
+        f"Статус: {status_text}{extra}\n"
+        f"Стоимость: {job.price_rub} ₽\n"
+        f"Создана: {job.created_at:%Y-%m-%d %H:%M}",
+        reply_markup=keyboards.job_detail_buttons(job.id),
+    )
     if job.status == JobStatus.done:
         delivered = await deliver_result(message.bot, user, job)
         async with async_session_factory() as session:
@@ -620,11 +706,15 @@ async def open_section(callback: CallbackQuery, state: FSMContext) -> None:
             await callback.answer("Доступ ограничен.")
             return
         draft = await get_or_create_draft(session, user.id, section)
-        if section in {Section.text, Section.image, Section.video, Section.audio, Section.three_d}:
-            draft.payload["awaiting_input"] = True
+        payload = draft.payload or {}
+        payload["awaiting_input"] = section in {Section.text, Section.image, Section.video, Section.audio, Section.three_d}
+        payload.setdefault("source_message_id", callback.message.message_id if callback.message else None)
+        payload.setdefault("input_type", "callback")
+        draft = await update_draft_payload(session, draft, payload)
+        if payload["awaiting_input"]:
+            await activate_draft(session, user.id, draft.id)
         else:
-            draft.payload["awaiting_input"] = False
-        await update_draft_payload(session, draft, draft.payload)
+            await deactivate_other_drafts(session, user.id, None)
     await set_fsm_context(
         state,
         user_id=callback.from_user.id,
@@ -632,25 +722,13 @@ async def open_section(callback: CallbackQuery, state: FSMContext) -> None:
         input_type="callback",
         mode=section.value,
     )
-
-    if section == Section.text:
-        text = f"{section_title(section)}\n\nВведите текст ниже."
-        markup = keyboards.text_options()
-    elif section == Section.image:
-        text = f"{section_title(section)}\n\nВведите текст. Если прикрепите изображение — будет редактирование."
-        markup = keyboards.image_options("square", "standard", False)
-    elif section == Section.video:
-        text = f"{section_title(section)}\n\nВведите текст. Можно прикрепить изображение."
-        markup = keyboards.video_options(False)
-    elif section == Section.audio:
-        text = f"{section_title(section)}\n\nВыберите режим работы."
-        markup = keyboards.audio_options()
-    elif section == Section.three_d:
-        text = f"{section_title(section)}\n\nПрикрепите изображение для 3D."
-        markup = keyboards.three_d_options()
+    text = render_section_prompt(section, user, draft)
+    if section == Section.audio and draft.payload.get("mode") == "tts":
+        async with async_session_factory() as session:
+            voices = await load_voices(session)
+        markup = keyboards.audio_tts_options(voices, draft.payload.get("voice_id"))
     else:
-        text = f"{section_title(section)}\n\nБаланс: {user.balance_rub} ₽"
-        markup = keyboards.balance_options()
+        markup = action_keyboard_for_draft(draft) if section != Section.balance else keyboards.balance_options()
     await callback.message.edit_text(text, reply_markup=markup)
     await callback.answer()
 
@@ -668,19 +746,8 @@ async def handle_text(message: Message, state: FSMContext) -> None:
         )
         draft = await find_active_draft(session, user.id)
         if not draft:
-            await message.answer(
-                "Не удалось распознать запрос. Откройте меню.",
-                reply_markup=keyboards.main_reply_keyboard(),
-            )
-            await message.answer(MAIN_PROMPT, reply_markup=keyboards.main_menu())
-            await set_fsm_context(
-                state,
-                user_id=message.from_user.id,
-                source_message_id=message.message_id,
-                input_type="fallback",
-                mode="menu",
-            )
-            return
+            draft = await get_or_create_draft(session, user.id, Section.text)
+            await activate_draft(session, user.id, draft.id)
         payload = draft.payload or {}
         payload["prompt"] = message.text
         payload["awaiting_input"] = False
@@ -773,7 +840,8 @@ async def image_mode_upscale(callback: CallbackQuery, state: FSMContext) -> None
         payload["awaiting_input"] = True
         payload.setdefault("source_message_id", callback.message.message_id if callback.message else None)
         payload.setdefault("input_type", "callback")
-        await update_draft_payload(session, draft, payload)
+        draft = await update_draft_payload(session, draft, payload)
+        await activate_draft(session, user.id, draft.id)
     await set_fsm_context(
         state,
         user_id=callback.from_user.id,
@@ -782,8 +850,8 @@ async def image_mode_upscale(callback: CallbackQuery, state: FSMContext) -> None
         mode="image:upscale",
     )
     await callback.message.edit_text(
-        "🖼 Изображения\n\nПрикрепите изображение для повышения качества.",
-        reply_markup=keyboards.image_upscale_options(False),
+        render_section_prompt(Section.image, user, draft),
+        reply_markup=action_keyboard_for_draft(draft),
     )
     await callback.answer()
 
@@ -829,7 +897,8 @@ async def video_mode_upscale(callback: CallbackQuery, state: FSMContext) -> None
         payload["awaiting_input"] = True
         payload.setdefault("source_message_id", callback.message.message_id if callback.message else None)
         payload.setdefault("input_type", "callback")
-        await update_draft_payload(session, draft, payload)
+        draft = await update_draft_payload(session, draft, payload)
+        await activate_draft(session, user.id, draft.id)
     await set_fsm_context(
         state,
         user_id=callback.from_user.id,
@@ -838,8 +907,8 @@ async def video_mode_upscale(callback: CallbackQuery, state: FSMContext) -> None
         mode="video:upscale",
     )
     await callback.message.edit_text(
-        "🎬 Видео\n\nПрикрепите видео документом для повышения качества.",
-        reply_markup=keyboards.video_upscale_options(False),
+        render_section_prompt(Section.video, user, draft),
+        reply_markup=action_keyboard_for_draft(draft),
     )
     await callback.answer()
 
@@ -886,22 +955,23 @@ async def audio_mode(callback: CallbackQuery, state: FSMContext) -> None:
         payload["awaiting_input"] = mode in {"music", "tts", "transcribe"}
         payload.setdefault("source_message_id", callback.message.message_id if callback.message else None)
         payload.setdefault("input_type", "callback")
-        await update_draft_payload(session, draft, payload)
+        draft = await update_draft_payload(session, draft, payload)
+        await activate_draft(session, user.id, draft.id)
         if mode == "transcribe":
             await callback.message.edit_text(
-                "🎧 Аудио\n\nПрикрепите mp3 документом и выберите формат результата.",
-                reply_markup=keyboards.audio_transcribe_options(),
+                render_section_prompt(Section.audio, user, draft),
+                reply_markup=keyboards.audio_transcribe_options(payload.get("transcribe_mode")),
             )
         elif mode == "music":
             await callback.message.edit_text(
-                "🎧 Аудио\n\nВведите тему или текст для музыки.",
-                reply_markup=keyboards.confirm_buttons(True),
+                render_section_prompt(Section.audio, user, draft),
+                reply_markup=action_keyboard_for_draft(draft),
             )
         else:
             voices = await load_voices(session)
             await callback.message.edit_text(
-                "🎧 Аудио\n\nВведите текст и выберите голос ниже.",
-                reply_markup=keyboards.audio_tts_options(voices),
+                render_section_prompt(Section.audio, user, draft),
+                reply_markup=keyboards.audio_tts_options(voices, payload.get("voice_id")),
             )
     await set_fsm_context(
         state,
@@ -944,6 +1014,45 @@ async def action_start(callback: CallbackQuery, state: FSMContext) -> None:
     await handle_task_creation(callback, state, request_id, "start")
 
 
+@router.callback_query(F.data == "action:confirm")
+async def action_confirm(callback: CallbackQuery, state: FSMContext) -> None:
+    request_id = uuid.uuid4().hex
+    log_handler_entry("action_confirm", callback.from_user.id, request_id=request_id, payload=callback.data)
+    async with async_session_factory() as session:
+        user = await get_or_create_user(
+            session,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            full_name=callback.from_user.full_name,
+        )
+        draft = await find_active_draft(session, user.id)
+        if not draft:
+            await callback.answer("Сначала выберите раздел.", show_alert=True)
+            return
+        is_valid, error_message = validate_draft(draft)
+        if not is_valid:
+            await callback.answer(error_message, show_alert=True)
+            return
+        price_rub = await calculate_price(session, user, draft)
+        if user.balance_rub < price_rub:
+            await callback.message.edit_text(
+                f"Баланс недостаточен.\n\n{render_price_block(price_rub, user.balance_rub)}\n\nПополните баланс.",
+                reply_markup=keyboards.balance_options(),
+            )
+            await callback.answer()
+            return
+        confirmation_text = render_confirmation_text(draft, price_rub, user.balance_rub)
+        await callback.message.edit_text(confirmation_text, reply_markup=keyboards.confirm_buttons(True))
+    await set_fsm_context(
+        state,
+        user_id=callback.from_user.id,
+        source_message_id=callback.message.message_id if callback.message else None,
+        input_type="callback",
+        mode="confirm",
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "action:retry")
 async def action_retry(callback: CallbackQuery, state: FSMContext) -> None:
     request_id = uuid.uuid4().hex
@@ -964,20 +1073,16 @@ async def jobs_list(callback: CallbackQuery, state: FSMContext) -> None:
         )
         jobs = await list_recent_jobs(session, user.id)
     if not jobs:
-        text = "📋 Мои задачи\n\nПока нет задач."
+        text = "📦 Мои задачи\n\nПока нет задач."
         await callback.message.edit_text(text, reply_markup=keyboards.back_and_home())
         await callback.answer()
         return
-    lines = ["📋 Мои задачи"]
+    lines = ["📦 Мои задачи"]
     for job in jobs:
-        status_text = {
-            JobStatus.queued: "🕒 В очереди",
-            JobStatus.processing: "⚙️ Обрабатывается",
-            JobStatus.done: "✅ Готово",
-            JobStatus.error: "❌ Ошибка",
-        }[job.status]
-        lines.append(f"• {section_title(job.section)} • {job.created_at:%Y-%m-%d %H:%M} • {status_text}")
-    await callback.message.edit_text("\n".join(lines), reply_markup=keyboards.job_list_buttons(jobs[0].id))
+        lines.append(
+            f"• #{job.id} • {section_title(job.section)} • {job.created_at:%Y-%m-%d %H:%M} • {job_status_label(job.status)}"
+        )
+    await callback.message.edit_text("\n".join(lines), reply_markup=keyboards.job_list_buttons([job.id for job in jobs]))
     await set_fsm_context(
         state,
         user_id=callback.from_user.id,
@@ -1062,6 +1167,44 @@ async def jobs_repeat(callback: CallbackQuery, state: FSMContext) -> None:
     )
 
 
+@router.callback_query(F.data.startswith("jobs:open:"))
+async def jobs_open(callback: CallbackQuery, state: FSMContext) -> None:
+    job_id = int(callback.data.split(":")[-1])
+    request_id = uuid.uuid4().hex
+    log_handler_entry("jobs_open", callback.from_user.id, request_id=request_id, payload=callback.data, job_id=job_id)
+    async with async_session_factory() as session:
+        result = await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
+        user = result.scalar_one_or_none()
+        job = await session.get(Job, job_id)
+        if not user or not job or job.user_id != user.id:
+            await callback.answer("Задача не найдена.", show_alert=True)
+            return
+    status_text = job_status_label(job.status)
+    extra = " (доставка не удалась)" if job.delivery_failed else ""
+    await callback.message.edit_text(
+        f"#{job.id} • {section_title(job.section)}\n"
+        f"Статус: {status_text}{extra}\n"
+        f"Стоимость: {job.price_rub} ₽\n"
+        f"Создана: {job.created_at:%Y-%m-%d %H:%M}",
+        reply_markup=keyboards.job_detail_buttons(job.id),
+    )
+    if job.status == JobStatus.done:
+        delivered = await deliver_result(callback.message.bot, user, job)
+        async with async_session_factory() as session:
+            await update_job_delivery_failure(session, job.id, not delivered)
+        if not delivered:
+            await callback.message.answer("Не удалось доставить результат.", reply_markup=keyboards.retry_task_button(job.id))
+    await set_fsm_context(
+        state,
+        user_id=callback.from_user.id,
+        source_message_id=callback.message.message_id if callback.message else None,
+        input_type="callback",
+        mode="job_detail",
+        preset=str(job_id),
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("delivery:retry:"))
 async def delivery_retry(callback: CallbackQuery, state: FSMContext) -> None:
     task_id = int(callback.data.split(":")[-1])
@@ -1114,10 +1257,21 @@ async def update_draft_option(callback: CallbackQuery, section: Section, key: st
         payload.setdefault("awaiting_input", True)
         payload.setdefault("source_message_id", callback.message.message_id if callback.message else None)
         payload.setdefault("input_type", "callback")
-        await update_draft_payload(session, draft, payload)
-        if section in {Section.image, Section.video}:
+        draft = await update_draft_payload(session, draft, payload)
+        await activate_draft(session, user.id, draft.id)
+        text = render_section_prompt(section, user, draft)
+        if section == Section.audio:
+            mode = payload.get("mode")
+            if mode == "transcribe":
+                markup = keyboards.audio_transcribe_options(payload.get("transcribe_mode"))
+            elif mode == "tts":
+                voices = await load_voices(session)
+                markup = keyboards.audio_tts_options(voices, payload.get("voice_id"))
+            else:
+                markup = action_keyboard_for_draft(draft)
+        else:
             markup = action_keyboard_for_draft(draft)
-            await callback.message.edit_reply_markup(reply_markup=markup)
+        await callback.message.edit_text(text, reply_markup=markup)
     await set_fsm_context(
         state,
         user_id=callback.from_user.id,

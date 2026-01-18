@@ -51,6 +51,77 @@ async def get_or_create_draft(session: AsyncSession, user_id: int, section: Sect
         raise
 
 
+async def deactivate_other_drafts(session: AsyncSession, user_id: int, active_draft_id: int | None = None) -> None:
+    try:
+        result = await session.execute(select(Draft).where(Draft.user_id == user_id))
+        drafts = result.scalars().all()
+        updated = False
+        for draft in drafts:
+            if active_draft_id is not None and draft.id == active_draft_id:
+                continue
+            payload = draft.payload or {}
+            if payload.get("awaiting_input"):
+                payload["awaiting_input"] = False
+                draft.payload = payload
+                updated = True
+        if updated:
+            await session.commit()
+    except SQLAlchemyError:
+        _log_db_error("deactivate_other_drafts", user_id=user_id, active_draft_id=active_draft_id)
+        raise
+
+
+async def activate_draft(session: AsyncSession, user_id: int, draft_id: int) -> Draft | None:
+    try:
+        draft = await session.get(Draft, draft_id)
+        if not draft or draft.user_id != user_id:
+            return None
+        await deactivate_other_drafts(session, user_id, draft_id)
+        payload = draft.payload or {}
+        payload["awaiting_input"] = True
+        draft.payload = payload
+        await session.commit()
+        await session.refresh(draft)
+        return draft
+    except SQLAlchemyError:
+        _log_db_error("activate_draft", user_id=user_id, draft_id=draft_id)
+        raise
+
+
+async def find_active_draft(session: AsyncSession, user_id: int) -> Draft | None:
+    try:
+        result = await session.execute(select(Draft).where(Draft.user_id == user_id))
+        drafts = result.scalars().all()
+        active = [draft for draft in drafts if (draft.payload or {}).get("awaiting_input")]
+        if not active:
+            return None
+        if len(active) == 1:
+            return active[0]
+        active_sorted = sorted(
+            active,
+            key=lambda draft: (draft.updated_at or draft.created_at),
+            reverse=True,
+        )
+        chosen = active_sorted[0]
+        for draft in active_sorted[1:]:
+            payload = draft.payload or {}
+            if payload.get("awaiting_input"):
+                payload["awaiting_input"] = False
+                draft.payload = payload
+        await session.commit()
+        logger.warning(
+            "multiple_active_drafts",
+            user_id=user_id,
+            chosen_id=chosen.id,
+            deactivated=[draft.id for draft in active_sorted[1:]],
+        )
+        await session.refresh(chosen)
+        return chosen
+    except SQLAlchemyError:
+        _log_db_error("find_active_draft", user_id=user_id)
+        raise
+
+
 async def update_draft_payload(session: AsyncSession, draft: Draft, payload: dict) -> Draft:
     try:
         draft.payload = payload

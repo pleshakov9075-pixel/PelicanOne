@@ -86,10 +86,26 @@ def confirm_buttons(ready: bool) -> InlineKeyboardMarkup:
     )
 
 
+def review_buttons(ready: bool) -> InlineKeyboardMarkup:
+    if ready:
+        row = [InlineKeyboardButton(text="✅ Подтвердить", callback_data="action:confirm")]
+    else:
+        row = [InlineKeyboardButton(text="⏳ Подтвердить", callback_data="noop")]
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            row,
+            [
+                InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
+            ],
+        ]
+    )
+
+
 def text_options() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Запустить", callback_data="action:start")],
+            [InlineKeyboardButton(text="✅ Подтвердить", callback_data="action:confirm")],
             [
                 InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
                 InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
@@ -98,18 +114,48 @@ def text_options() -> InlineKeyboardMarkup:
     )
 
 
-def image_options(size: str, quality: str, show_start: bool = True) -> InlineKeyboardMarkup:
+def image_options(size: str | None, quality: str | None, show_start: bool = True) -> InlineKeyboardMarkup:
+    selected_size = size
+    selected_quality = quality
+    size_labels = {
+        "square": "Квадрат",
+        "vertical": "Вертикально",
+        "horizontal": "Горизонтально",
+    }
+    quality_labels = {
+        "standard": "Стандарт",
+        "high": "Высокое",
+        "max": "Максимум",
+    }
     rows = [
         [InlineKeyboardButton(text="Повышение качества", callback_data="image:mode:upscale")],
         [
-            InlineKeyboardButton(text="Квадрат", callback_data="image:size:square"),
-            InlineKeyboardButton(text="Вертикально", callback_data="image:size:vertical"),
-            InlineKeyboardButton(text="Горизонтально", callback_data="image:size:horizontal"),
+            InlineKeyboardButton(
+                text=f"{'✅ ' if selected_size == 'square' else ''}{size_labels['square']}",
+                callback_data="image:size:square",
+            ),
+            InlineKeyboardButton(
+                text=f"{'✅ ' if selected_size == 'vertical' else ''}{size_labels['vertical']}",
+                callback_data="image:size:vertical",
+            ),
+            InlineKeyboardButton(
+                text=f"{'✅ ' if selected_size == 'horizontal' else ''}{size_labels['horizontal']}",
+                callback_data="image:size:horizontal",
+            ),
         ],
         [
-            InlineKeyboardButton(text="Стандарт", callback_data="image:quality:standard"),
-            InlineKeyboardButton(text="Высокое", callback_data="image:quality:high"),
-            InlineKeyboardButton(text="Максимум", callback_data="image:quality:max"),
+            InlineKeyboardButton(
+                text=f"{'✅ ' if selected_quality == 'standard' else ''}{quality_labels['standard']}",
+                callback_data="image:quality:standard",
+            ),
+            InlineKeyboardButton(
+                text=f"{'✅ ' if selected_quality == 'high' else ''}{quality_labels['high']}",
+                callback_data="image:quality:high",
+            ),
+            InlineKeyboardButton(
+                text=f"{'✅ ' if selected_quality == 'max' else ''}{quality_labels['max']}",
+                callback_data="image:quality:max",
+            ),
         ],
         [
             InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
@@ -117,39 +163,60 @@ def image_options(size: str, quality: str, show_start: bool = True) -> InlineKey
         ],
     ]
     if show_start:
-        rows.insert(-1, [InlineKeyboardButton(text="✅ Запустить", callback_data="action:start")])
+        rows.insert(-1, [InlineKeyboardButton(text="✅ Подтвердить", callback_data="action:confirm")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def image_upscale_options(show_start: bool = True) -> InlineKeyboardMarkup:
+def image_upscale_options(selected: int | None = None, show_start: bool = True) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text="x2", callback_data="image:upscale:2")],
-        [InlineKeyboardButton(text="x4", callback_data="image:upscale:4")],
+        [InlineKeyboardButton(text=f"{'✅ ' if selected == 2 else ''}x2", callback_data="image:upscale:2")],
+        [InlineKeyboardButton(text=f"{'✅ ' if selected == 4 else ''}x4", callback_data="image:upscale:4")],
         [
             InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
             InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
         ],
     ]
     if show_start:
-        rows.insert(-1, [InlineKeyboardButton(text="✅ Запустить", callback_data="action:start")])
+        rows.insert(-1, [InlineKeyboardButton(text="✅ Подтвердить", callback_data="action:confirm")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def video_options(show_start: bool = True) -> InlineKeyboardMarkup:
+def video_options(
+    size: str | None,
+    duration: int | None,
+    with_audio: bool | None,
+    show_start: bool = True,
+) -> InlineKeyboardMarkup:
+    selected_size = size
     rows = [
         [InlineKeyboardButton(text="Повышение качества", callback_data="video:mode:upscale")],
         [
-            InlineKeyboardButton(text="Квадрат", callback_data="video:size:square"),
-            InlineKeyboardButton(text="Вертикально", callback_data="video:size:vertical"),
-            InlineKeyboardButton(text="Горизонтально", callback_data="video:size:horizontal"),
+            InlineKeyboardButton(
+                text=f"{'✅ ' if selected_size == 'square' else ''}Квадрат",
+                callback_data="video:size:square",
+            ),
+            InlineKeyboardButton(
+                text=f"{'✅ ' if selected_size == 'vertical' else ''}Вертикально",
+                callback_data="video:size:vertical",
+            ),
+            InlineKeyboardButton(
+                text=f"{'✅ ' if selected_size == 'horizontal' else ''}Горизонтально",
+                callback_data="video:size:horizontal",
+            ),
         ],
         [
-            InlineKeyboardButton(text="5 сек", callback_data="video:duration:5"),
-            InlineKeyboardButton(text="10 сек", callback_data="video:duration:10"),
+            InlineKeyboardButton(text=f"{'✅ ' if duration == 5 else ''}5 сек", callback_data="video:duration:5"),
+            InlineKeyboardButton(text=f"{'✅ ' if duration == 10 else ''}10 сек", callback_data="video:duration:10"),
         ],
         [
-            InlineKeyboardButton(text="Со звуком", callback_data="video:audio:yes"),
-            InlineKeyboardButton(text="Без звука", callback_data="video:audio:no"),
+            InlineKeyboardButton(
+                text=f"{'✅ ' if with_audio is True else ''}Со звуком",
+                callback_data="video:audio:yes",
+            ),
+            InlineKeyboardButton(
+                text=f"{'✅ ' if with_audio is False else ''}Без звука",
+                callback_data="video:audio:no",
+            ),
         ],
         [
             InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
@@ -157,30 +224,36 @@ def video_options(show_start: bool = True) -> InlineKeyboardMarkup:
         ],
     ]
     if show_start:
-        rows.insert(-1, [InlineKeyboardButton(text="✅ Запустить", callback_data="action:start")])
+        rows.insert(-1, [InlineKeyboardButton(text="✅ Подтвердить", callback_data="action:confirm")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def video_upscale_options(show_start: bool = True) -> InlineKeyboardMarkup:
+def video_upscale_options(selected: int | None = None, show_start: bool = True) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text="x2", callback_data="video:upscale:2")],
-        [InlineKeyboardButton(text="x4", callback_data="video:upscale:4")],
+        [InlineKeyboardButton(text=f"{'✅ ' if selected == 2 else ''}x2", callback_data="video:upscale:2")],
+        [InlineKeyboardButton(text=f"{'✅ ' if selected == 4 else ''}x4", callback_data="video:upscale:4")],
         [
             InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
             InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
         ],
     ]
     if show_start:
-        rows.insert(-1, [InlineKeyboardButton(text="✅ Запустить", callback_data="action:start")])
+        rows.insert(-1, [InlineKeyboardButton(text="✅ Подтвердить", callback_data="action:confirm")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def audio_options() -> InlineKeyboardMarkup:
+def audio_options(selected_mode: str | None = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Расшифровка", callback_data="audio:mode:transcribe")],
-            [InlineKeyboardButton(text="Музыка", callback_data="audio:mode:music")],
-            [InlineKeyboardButton(text="Озвучка текста", callback_data="audio:mode:tts")],
+            [InlineKeyboardButton(
+                text=f"{'✅ ' if selected_mode == 'transcribe' else ''}Расшифровка",
+                callback_data="audio:mode:transcribe",
+            )],
+            [InlineKeyboardButton(text=f"{'✅ ' if selected_mode == 'music' else ''}Музыка", callback_data="audio:mode:music")],
+            [InlineKeyboardButton(
+                text=f"{'✅ ' if selected_mode == 'tts' else ''}Озвучка текста",
+                callback_data="audio:mode:tts",
+            )],
             [
                 InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
                 InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
@@ -189,12 +262,18 @@ def audio_options() -> InlineKeyboardMarkup:
     )
 
 
-def audio_transcribe_options() -> InlineKeyboardMarkup:
+def audio_transcribe_options(selected: str | None = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Только текст", callback_data="audio:transcribe:text")],
-            [InlineKeyboardButton(text="Текст + кратко", callback_data="audio:transcribe:summary")],
-            [InlineKeyboardButton(text="✅ Запустить", callback_data="action:start")],
+            [InlineKeyboardButton(
+                text=f"{'✅ ' if selected == 'text' else ''}Только текст",
+                callback_data="audio:transcribe:text",
+            )],
+            [InlineKeyboardButton(
+                text=f"{'✅ ' if selected == 'summary' else ''}Текст + кратко",
+                callback_data="audio:transcribe:summary",
+            )],
+            [InlineKeyboardButton(text="✅ Подтвердить", callback_data="action:confirm")],
             [
                 InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
                 InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
@@ -203,9 +282,17 @@ def audio_transcribe_options() -> InlineKeyboardMarkup:
     )
 
 
-def audio_tts_options(voices: list[tuple[int, str]]) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(text=title, callback_data=f"audio:voice:{voice_id}")] for voice_id, title in voices]
-    rows.append([InlineKeyboardButton(text="✅ Запустить", callback_data="action:start")])
+def audio_tts_options(voices: list[tuple[int, str]], selected_voice_id: int | None = None) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=f"{'✅ ' if voice_id == selected_voice_id else ''}{title}",
+                callback_data=f"audio:voice:{voice_id}",
+            )
+        ]
+        for voice_id, title in voices
+    ]
+    rows.append([InlineKeyboardButton(text="✅ Подтвердить", callback_data="action:confirm")])
     rows.append([
         InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
         InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
@@ -213,30 +300,40 @@ def audio_tts_options(voices: list[tuple[int, str]]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def three_d_options(show_start: bool = True) -> InlineKeyboardMarkup:
+def three_d_options(selected: str | None = None, show_start: bool = True) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text="512", callback_data="three_d:quality:512")],
-        [InlineKeyboardButton(text="1024", callback_data="three_d:quality:1024")],
-        [InlineKeyboardButton(text="1536", callback_data="three_d:quality:1536")],
+        [InlineKeyboardButton(text=f"{'✅ ' if selected == '512' else ''}512", callback_data="three_d:quality:512")],
+        [InlineKeyboardButton(text=f"{'✅ ' if selected == '1024' else ''}1024", callback_data="three_d:quality:1024")],
+        [InlineKeyboardButton(text=f"{'✅ ' if selected == '1536' else ''}1536", callback_data="three_d:quality:1536")],
         [
             InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
             InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
         ],
     ]
     if show_start:
-        rows.insert(-1, [InlineKeyboardButton(text="✅ Запустить", callback_data="action:start")])
+        rows.insert(-1, [InlineKeyboardButton(text="✅ Подтвердить", callback_data="action:confirm")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def job_list_buttons(job_id: int | None) -> InlineKeyboardMarkup:
-    rows = []
-    if job_id:
-        rows.append([InlineKeyboardButton(text="🔄 Повторить", callback_data=f"jobs:repeat:{job_id}")])
+def job_list_buttons(job_ids: list[int]) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text=f"Открыть #{job_id}", callback_data=f"jobs:open:{job_id}")] for job_id in job_ids]
     rows.append([
         InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
         InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def job_detail_buttons(job_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Повторить", callback_data=f"jobs:repeat:{job_id}")],
+            [
+                InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
+            ],
+        ]
+    )
 
 
 def summarize_button() -> InlineKeyboardMarkup:
@@ -270,3 +367,11 @@ def retry_create_button() -> InlineKeyboardMarkup:
             ],
         ]
     )
+
+
+def result_actions(job_id: int | None) -> InlineKeyboardMarkup:
+    rows = []
+    if job_id:
+        rows.append([InlineKeyboardButton(text="🔁 Повторить", callback_data=f"jobs:repeat:{job_id}")])
+    rows.append([InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import traceback
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -11,7 +12,7 @@ from app.config import settings
 from app.crud import update_job_status
 from app.db import async_session_factory
 from app.models import Job, JobStatus, Section, User
-from app.bot.keyboards import summarize_button
+from app.bot.keyboards import result_actions, summarize_button
 from app.crud import update_job_delivery_failure
 from app.services.delivery import deliver_result
 from app.text_utils import split_text
@@ -20,43 +21,70 @@ logger = get_logger()
 
 
 async def _process(job_id: int) -> None:
-    async with async_session_factory() as session:
-        job = await session.get(Job, job_id)
-        if not job:
-            return
-        await update_job_status(session, job.id, JobStatus.processing)
-        await session.refresh(job)
-        if job.section == Section.text:
-            prompt = job.payload.get("prompt", "")
-            result_payload = {"message": prompt or "Текст готов."}
-        else:
-            result_payload = {"message": "Готово"}
-        await update_job_status(session, job.id, JobStatus.done, result_payload)
-        await session.refresh(job)
-        user = await session.get(User, job.user_id)
-        if not user:
-            return
-        logger.info("task_result_ready", task_id=job.id, user_id=job.user_id, status=job.status.value)
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-    delivered = True
     try:
-        if job.section == Section.text:
-            text = job.result.get("message", "Готово")
-            parts = split_text(text)
-            for part in parts:
-                await bot.send_message(user.telegram_id, part)
-            await bot.send_message(user.telegram_id, "Нужен краткий вариант?", reply_markup=summarize_button())
-        else:
-            delivered = await deliver_result(bot, user, job)
-    except Exception as exc:
-        logger.exception("deliver_text_failed", task_id=job.id, error=str(exc))
-        delivered = False
-    async with async_session_factory() as session:
-        await update_job_delivery_failure(session, job.id, not delivered)
-    await bot.session.close()
+        async with async_session_factory() as session:
+            job = await session.get(Job, job_id)
+            if not job:
+                return
+            await update_job_status(session, job.id, JobStatus.processing)
+            await session.refresh(job)
+            if job.section == Section.text:
+                prompt = job.payload.get("prompt", "")
+                result_payload = {"message": prompt or "Текст готов."}
+            else:
+                result_payload = {"message": "Готово"}
+            await update_job_status(session, job.id, JobStatus.done, result_payload)
+            await session.refresh(job)
+            user = await session.get(User, job.user_id)
+            if not user:
+                return
+            logger.info("task_result_ready", task_id=job.id, user_id=job.user_id, status=job.status.value)
+        delivered = True
+        try:
+            if job.section == Section.text:
+                text = job.result.get("message", "Готово")
+                parts = split_text(text)
+                for part in parts:
+                    await bot.send_message(user.telegram_id, part)
+                await bot.send_message(user.telegram_id, "Нужен краткий вариант?", reply_markup=summarize_button())
+                await bot.send_message(user.telegram_id, "Что дальше?", reply_markup=result_actions(job.id))
+            else:
+                delivered = await deliver_result(bot, user, job)
+                if delivered:
+                    await bot.send_message(user.telegram_id, "Что дальше?", reply_markup=result_actions(job.id))
+        except Exception as exc:
+            logger.exception("deliver_text_failed", task_id=job.id, error=str(exc))
+            delivered = False
+        async with async_session_factory() as session:
+            await update_job_delivery_failure(session, job.id, not delivered)
+        if not delivered:
+            await bot.send_message(
+                user.telegram_id,
+                "Не удалось доставить результат. Попробуйте повторить.",
+                reply_markup=result_actions(job.id),
+            )
+    except Exception:
+        error_trace = traceback.format_exc()
+        logger.exception("task_processing_failed", task_id=job_id)
+        async with async_session_factory() as session:
+            job = await session.get(Job, job_id)
+            if job:
+                await update_job_status(session, job.id, JobStatus.error, error_message=error_trace)
+                user = await session.get(User, job.user_id)
+            else:
+                user = None
+        if job and user:
+            await bot.send_message(
+                user.telegram_id,
+                "Произошла ошибка при выполнении задачи. Попробуйте повторить.",
+                reply_markup=result_actions(job.id),
+            )
+    finally:
+        await bot.session.close()
 
 
 def process_job(job_id: int) -> None:
