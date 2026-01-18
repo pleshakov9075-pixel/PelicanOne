@@ -3,7 +3,7 @@ from __future__ import annotations
 from aiogram import F, Router
 from aiogram.enums import ContentType
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,52 +88,96 @@ def render_price_block(price_rub: int, balance_rub: int) -> str:
     return f"Стоимость: {price_rub} ₽\nБаланс: {balance_rub} ₽"
 
 
-def draft_ready(draft: Draft) -> bool:
+def validate_draft(draft: Draft) -> tuple[bool, str]:
     payload = draft.payload or {}
     if draft.section == Section.text:
-        return bool(payload.get("prompt"))
+        if not payload.get("prompt"):
+            return False, "Введите текст для генерации."
+        return True, ""
     if draft.section == Section.image:
         if payload.get("mode") == "upscale":
-            return bool(payload.get("file_id")) and bool(payload.get("upscale"))
-        return bool(payload.get("prompt"))
+            if not payload.get("file_id"):
+                return False, "Загрузите изображение для апскейла."
+            if not payload.get("upscale"):
+                return False, "Выберите коэффициент апскейла."
+            return True, ""
+        if not (payload.get("prompt") or payload.get("file_id")):
+            return False, "Введите текст или загрузите изображение."
+        if not payload.get("size"):
+            return False, "Выберите размер изображения."
+        if not payload.get("quality"):
+            return False, "Выберите качество изображения."
+        return True, ""
     if draft.section == Section.video:
         if payload.get("mode") == "upscale":
-            return bool(payload.get("file_id")) and bool(payload.get("upscale"))
-        return bool(payload.get("prompt"))
+            if not payload.get("file_id"):
+                return False, "Загрузите видео для апскейла."
+            if not payload.get("upscale"):
+                return False, "Выберите коэффициент апскейла."
+            return True, ""
+        if not (payload.get("prompt") or payload.get("file_id")):
+            return False, "Введите текст или загрузите изображение."
+        if not payload.get("size"):
+            return False, "Выберите размер видео."
+        if not payload.get("duration"):
+            return False, "Выберите длительность видео."
+        if payload.get("with_audio") is None:
+            return False, "Выберите наличие звука."
+        return True, ""
     if draft.section == Section.audio:
-        mode = payload.get("mode", "music")
+        mode = payload.get("mode")
+        if not mode:
+            return False, "Выберите режим аудио."
         if mode == "transcribe":
-            return bool(payload.get("file_id")) and bool(payload.get("transcribe_mode"))
+            if not payload.get("file_id"):
+                return False, "Загрузите аудио для расшифровки."
+            if not payload.get("transcribe_mode"):
+                return False, "Выберите формат расшифровки."
+            return True, ""
         if mode == "tts":
-            return bool(payload.get("prompt")) and bool(payload.get("voice_id"))
-        return bool(payload.get("prompt"))
+            if not payload.get("prompt"):
+                return False, "Введите текст для озвучки."
+            if not payload.get("voice_id"):
+                return False, "Выберите голос."
+            return True, ""
+        if not payload.get("prompt"):
+            return False, "Введите текст для генерации."
+        return True, ""
     if draft.section == Section.three_d:
-        return bool(payload.get("file_id")) and bool(payload.get("quality"))
-    return True
+        if not payload.get("file_id"):
+            return False, "Загрузите изображение для 3D."
+        if not payload.get("quality"):
+            return False, "Выберите качество 3D."
+        return True, ""
+    return True, ""
 
 
-def missing_draft_message(draft: Draft) -> str:
+def action_keyboard_for_draft(draft: Draft) -> InlineKeyboardMarkup:
     payload = draft.payload or {}
+    is_valid, _ = validate_draft(draft)
     if draft.section == Section.text:
-        return "Добавьте текст запроса."
+        return keyboards.confirm_buttons(is_valid)
     if draft.section == Section.image:
         if payload.get("mode") == "upscale":
-            return "Прикрепите изображение и выберите апскейл."
-        return "Добавьте текст запроса."
+            return keyboards.image_upscale_options(is_valid)
+        return keyboards.image_options(payload.get("size"), payload.get("quality"), is_valid)
     if draft.section == Section.video:
         if payload.get("mode") == "upscale":
-            return "Прикрепите видео и выберите апскейл."
-        return "Добавьте текст запроса."
+            return keyboards.video_upscale_options(is_valid)
+        return keyboards.video_options(is_valid)
     if draft.section == Section.audio:
-        mode = payload.get("mode", "music")
-        if mode == "transcribe":
-            return "Прикрепите аудио и выберите формат."
-        if mode == "tts":
-            return "Добавьте текст и выберите голос."
-        return "Добавьте текст запроса."
+        return keyboards.confirm_buttons(is_valid)
     if draft.section == Section.three_d:
-        return "Прикрепите изображение и выберите качество."
-    return "Добавьте параметры."
+        return keyboards.three_d_options(is_valid)
+    return keyboards.confirm_buttons(is_valid)
+
+
+def render_action_text(draft: Draft, price_rub: int, balance_rub: int) -> str:
+    base = f"{section_title(draft.section)}\n\n{render_price_block(price_rub, balance_rub)}"
+    is_valid, _ = validate_draft(draft)
+    if is_valid:
+        return f"{base}\n\nНажмите «Запустить»."
+    return f"{base}\n\nВыберите параметры для запуска."
 
 
 def split_payload_and_options(draft: Draft) -> tuple[dict, dict]:
@@ -224,10 +268,10 @@ async def open_section(callback: CallbackQuery) -> None:
         markup = keyboards.text_options()
     elif section == Section.image:
         text = f"{section_title(section)}\n\nВведите текст. Если прикрепите изображение — будет редактирование."
-        markup = keyboards.image_options("square", "standard")
+        markup = keyboards.image_options("square", "standard", False)
     elif section == Section.video:
         text = f"{section_title(section)}\n\nВведите текст. Можно прикрепить изображение."
-        markup = keyboards.video_options()
+        markup = keyboards.video_options(False)
     elif section == Section.audio:
         text = f"{section_title(section)}\n\nВыберите режим работы."
         markup = keyboards.audio_options()
@@ -261,8 +305,8 @@ async def handle_text(message: Message) -> None:
         payload["awaiting_input"] = False
         await update_draft_payload(session, draft, payload)
         price_rub = await calculate_price(session, user, draft)
-    text = f"{section_title(draft.section)}\n\n{render_price_block(price_rub, user.balance_rub)}\n\nНажмите «Запустить»."
-    await message.answer(text, reply_markup=keyboards.confirm_buttons(True))
+    text = render_action_text(draft, price_rub, user.balance_rub)
+    await message.answer(text, reply_markup=action_keyboard_for_draft(draft))
 
 
 @router.message(F.content_type.in_({ContentType.PHOTO, ContentType.DOCUMENT, ContentType.VIDEO}))
@@ -288,8 +332,8 @@ async def handle_media(message: Message) -> None:
             payload["file_id"] = message.video.file_id
         await update_draft_payload(session, draft, payload)
         price_rub = await calculate_price(session, user, draft)
-    text = f"{section_title(draft.section)}\n\n{render_price_block(price_rub, user.balance_rub)}\n\nНажмите «Запустить»."
-    await message.answer(text, reply_markup=keyboards.confirm_buttons(True))
+    text = render_action_text(draft, price_rub, user.balance_rub)
+    await message.answer(text, reply_markup=action_keyboard_for_draft(draft))
 
 
 @router.callback_query(F.data.startswith("image:size:"))
@@ -316,7 +360,7 @@ async def image_mode_upscale(callback: CallbackQuery) -> None:
         await update_draft_payload(session, draft, payload)
     await callback.message.edit_text(
         "🖼 Изображения\n\nПрикрепите изображение для повышения качества.",
-        reply_markup=keyboards.image_upscale_options(),
+        reply_markup=keyboards.image_upscale_options(False),
     )
     await callback.answer()
 
@@ -359,7 +403,7 @@ async def video_mode_upscale(callback: CallbackQuery) -> None:
         await update_draft_payload(session, draft, payload)
     await callback.message.edit_text(
         "🎬 Видео\n\nПрикрепите видео документом для повышения качества.",
-        reply_markup=keyboards.video_upscale_options(),
+        reply_markup=keyboards.video_upscale_options(False),
     )
     await callback.answer()
 
@@ -453,10 +497,11 @@ async def action_start(callback: CallbackQuery) -> None:
         )
         draft = await find_active_draft(session, user.id)
         if not draft:
-            await callback.answer("Сначала укажите параметры.", show_alert=True)
+            await callback.answer("Сначала выберите раздел.", show_alert=True)
             return
-        if not draft_ready(draft):
-            await callback.answer(missing_draft_message(draft), show_alert=True)
+        is_valid, error_message = validate_draft(draft)
+        if not is_valid:
+            await callback.answer(error_message, show_alert=True)
             return
         price_rub = await calculate_price(session, user, draft)
         if user.balance_rub < price_rub:
@@ -617,6 +662,9 @@ async def update_draft_option(callback: CallbackQuery, section: Section, key: st
         payload[key] = value
         payload.setdefault("awaiting_input", True)
         await update_draft_payload(session, draft, payload)
+        if section in {Section.image, Section.video}:
+            markup = action_keyboard_for_draft(draft)
+            await callback.message.edit_reply_markup(reply_markup=markup)
     await callback.answer("Готово")
 
 
