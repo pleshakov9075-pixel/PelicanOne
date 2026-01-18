@@ -47,8 +47,11 @@ services:
 
   migrations:
     build: .
-    command: alembic upgrade head
+    working_dir: /app
+    command: sh -lc "alembic upgrade head"
     env_file: .env
+    environment:
+      PYTHONPATH: /app
     depends_on:
       - postgres
 
