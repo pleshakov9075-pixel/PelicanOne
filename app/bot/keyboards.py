@@ -56,7 +56,7 @@ def text_options() -> InlineKeyboardMarkup:
     )
 
 
-def image_options(size: str, quality: str) -> InlineKeyboardMarkup:
+def image_options(size: str, quality: str, show_start: bool = True) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="Повышение качества", callback_data="image:mode:upscale")],
         [
@@ -69,55 +69,56 @@ def image_options(size: str, quality: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="Высокое", callback_data="image:quality:high"),
             InlineKeyboardButton(text="Максимум", callback_data="image:quality:max"),
         ],
-        [InlineKeyboardButton(text="✅ Запустить", callback_data="action:start")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu")],
     ]
+    if show_start:
+        rows.insert(-1, [InlineKeyboardButton(text="✅ Запустить", callback_data="action:start")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def image_upscale_options() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="x2", callback_data="image:upscale:2")],
-            [InlineKeyboardButton(text="x4", callback_data="image:upscale:4")],
-            [InlineKeyboardButton(text="✅ Запустить", callback_data="action:start")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu")],
-        ]
-    )
+def image_upscale_options(show_start: bool = True) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="x2", callback_data="image:upscale:2")],
+        [InlineKeyboardButton(text="x4", callback_data="image:upscale:4")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu")],
+    ]
+    if show_start:
+        rows.insert(-1, [InlineKeyboardButton(text="✅ Запустить", callback_data="action:start")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def video_options() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Повышение качества", callback_data="video:mode:upscale")],
-            [
-                InlineKeyboardButton(text="Квадрат", callback_data="video:size:square"),
-                InlineKeyboardButton(text="Вертикально", callback_data="video:size:vertical"),
-                InlineKeyboardButton(text="Горизонтально", callback_data="video:size:horizontal"),
-            ],
-            [
-                InlineKeyboardButton(text="5 сек", callback_data="video:duration:5"),
-                InlineKeyboardButton(text="10 сек", callback_data="video:duration:10"),
-            ],
-            [
-                InlineKeyboardButton(text="Со звуком", callback_data="video:audio:yes"),
-                InlineKeyboardButton(text="Без звука", callback_data="video:audio:no"),
-            ],
-            [InlineKeyboardButton(text="✅ Запустить", callback_data="action:start")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu")],
-        ]
-    )
+def video_options(show_start: bool = True) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="Повышение качества", callback_data="video:mode:upscale")],
+        [
+            InlineKeyboardButton(text="Квадрат", callback_data="video:size:square"),
+            InlineKeyboardButton(text="Вертикально", callback_data="video:size:vertical"),
+            InlineKeyboardButton(text="Горизонтально", callback_data="video:size:horizontal"),
+        ],
+        [
+            InlineKeyboardButton(text="5 сек", callback_data="video:duration:5"),
+            InlineKeyboardButton(text="10 сек", callback_data="video:duration:10"),
+        ],
+        [
+            InlineKeyboardButton(text="Со звуком", callback_data="video:audio:yes"),
+            InlineKeyboardButton(text="Без звука", callback_data="video:audio:no"),
+        ],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu")],
+    ]
+    if show_start:
+        rows.insert(-1, [InlineKeyboardButton(text="✅ Запустить", callback_data="action:start")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def video_upscale_options() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="x2", callback_data="video:upscale:2")],
-            [InlineKeyboardButton(text="x4", callback_data="video:upscale:4")],
-            [InlineKeyboardButton(text="✅ Запустить", callback_data="action:start")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu")],
-        ]
-    )
+def video_upscale_options(show_start: bool = True) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="x2", callback_data="video:upscale:2")],
+        [InlineKeyboardButton(text="x4", callback_data="video:upscale:4")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu")],
+    ]
+    if show_start:
+        rows.insert(-1, [InlineKeyboardButton(text="✅ Запустить", callback_data="action:start")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def audio_options() -> InlineKeyboardMarkup:
@@ -149,16 +150,16 @@ def audio_tts_options(voices: list[tuple[int, str]]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def three_d_options() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="512", callback_data="three_d:quality:512")],
-            [InlineKeyboardButton(text="1024", callback_data="three_d:quality:1024")],
-            [InlineKeyboardButton(text="1536", callback_data="three_d:quality:1536")],
-            [InlineKeyboardButton(text="✅ Запустить", callback_data="action:start")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu")],
-        ]
-    )
+def three_d_options(show_start: bool = True) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="512", callback_data="three_d:quality:512")],
+        [InlineKeyboardButton(text="1024", callback_data="three_d:quality:1024")],
+        [InlineKeyboardButton(text="1536", callback_data="three_d:quality:1536")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu")],
+    ]
+    if show_start:
+        rows.insert(-1, [InlineKeyboardButton(text="✅ Запустить", callback_data="action:start")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def job_list_buttons(job_id: int | None) -> InlineKeyboardMarkup:
