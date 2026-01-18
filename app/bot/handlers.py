@@ -50,6 +50,10 @@ MAIN_PROMPT = """
 """.strip()
 
 
+def log_handler_entry(handler: str, user_id: int, **context: object) -> None:
+    logger.info("handler_entry", handler=handler, user_id=user_id, **context)
+
+
 def section_title(section: Section) -> str:
     titles = {
         Section.text: "🧠 Текст",
@@ -110,6 +114,7 @@ def draft_ready(draft: Draft) -> bool:
 
 @router.message(F.text == "/start")
 async def start(message: Message) -> None:
+    log_handler_entry("start", message.from_user.id, payload=message.text)
     async with async_session_factory() as session:
         await get_or_create_user(
             session,
@@ -123,6 +128,7 @@ async def start(message: Message) -> None:
 @router.callback_query(F.data == "menu:home")
 @router.callback_query(F.data == "back:menu")
 async def back_to_menu(callback: CallbackQuery) -> None:
+    log_handler_entry("back_to_menu", callback.from_user.id, payload=callback.data)
     await callback.message.edit_text(MAIN_PROMPT, reply_markup=keyboards.main_menu())
     await callback.answer()
 
@@ -131,6 +137,7 @@ async def back_to_menu(callback: CallbackQuery) -> None:
 async def open_section(callback: CallbackQuery) -> None:
     section_key = callback.data.split(":", 1)[1]
     section = Section(section_key)
+    log_handler_entry("open_section", callback.from_user.id, payload=callback.data, section=section.value)
     async with async_session_factory() as session:
         user = await get_or_create_user(
             session,
@@ -174,6 +181,7 @@ async def open_section(callback: CallbackQuery) -> None:
 async def handle_text(message: Message) -> None:
     if message.text.startswith("/"):
         return
+    log_handler_entry("handle_text", message.from_user.id, payload=message.text)
     async with async_session_factory() as session:
         user = await get_or_create_user(
             session,
@@ -195,6 +203,7 @@ async def handle_text(message: Message) -> None:
 
 @router.message(F.content_type.in_({ContentType.PHOTO, ContentType.DOCUMENT, ContentType.VIDEO}))
 async def handle_media(message: Message) -> None:
+    log_handler_entry("handle_media", message.from_user.id, payload=message.content_type)
     async with async_session_factory() as session:
         user = await get_or_create_user(
             session,
@@ -222,11 +231,13 @@ async def handle_media(message: Message) -> None:
 @router.callback_query(F.data.startswith("image:size:"))
 async def image_size(callback: CallbackQuery) -> None:
     size = callback.data.split(":")[-1]
+    log_handler_entry("image_size", callback.from_user.id, payload=callback.data, size=size)
     await update_draft_option(callback, Section.image, "size", size)
 
 
 @router.callback_query(F.data == "image:mode:upscale")
 async def image_mode_upscale(callback: CallbackQuery) -> None:
+    log_handler_entry("image_mode_upscale", callback.from_user.id, payload=callback.data)
     async with async_session_factory() as session:
         user = await get_or_create_user(
             session,
@@ -249,23 +260,27 @@ async def image_mode_upscale(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("image:quality:"))
 async def image_quality(callback: CallbackQuery) -> None:
     quality = callback.data.split(":")[-1]
+    log_handler_entry("image_quality", callback.from_user.id, payload=callback.data, quality=quality)
     await update_draft_option(callback, Section.image, "quality", quality)
 
 
 @router.callback_query(F.data.startswith("image:upscale:"))
 async def image_upscale(callback: CallbackQuery) -> None:
     factor = int(callback.data.split(":")[-1])
+    log_handler_entry("image_upscale", callback.from_user.id, payload=callback.data, factor=factor)
     await update_draft_option(callback, Section.image, "upscale", factor)
 
 
 @router.callback_query(F.data.startswith("video:size:"))
 async def video_size(callback: CallbackQuery) -> None:
     size = callback.data.split(":")[-1]
+    log_handler_entry("video_size", callback.from_user.id, payload=callback.data, size=size)
     await update_draft_option(callback, Section.video, "size", size)
 
 
 @router.callback_query(F.data == "video:mode:upscale")
 async def video_mode_upscale(callback: CallbackQuery) -> None:
+    log_handler_entry("video_mode_upscale", callback.from_user.id, payload=callback.data)
     async with async_session_factory() as session:
         user = await get_or_create_user(
             session,
@@ -288,24 +303,28 @@ async def video_mode_upscale(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("video:duration:"))
 async def video_duration(callback: CallbackQuery) -> None:
     duration = int(callback.data.split(":")[-1])
+    log_handler_entry("video_duration", callback.from_user.id, payload=callback.data, duration=duration)
     await update_draft_option(callback, Section.video, "duration", duration)
 
 
 @router.callback_query(F.data.startswith("video:audio:"))
 async def video_audio(callback: CallbackQuery) -> None:
     audio = callback.data.split(":")[-1] == "yes"
+    log_handler_entry("video_audio", callback.from_user.id, payload=callback.data, with_audio=audio)
     await update_draft_option(callback, Section.video, "with_audio", audio)
 
 
 @router.callback_query(F.data.startswith("video:upscale:"))
 async def video_upscale(callback: CallbackQuery) -> None:
     factor = int(callback.data.split(":")[-1])
+    log_handler_entry("video_upscale", callback.from_user.id, payload=callback.data, factor=factor)
     await update_draft_option(callback, Section.video, "upscale", factor)
 
 
 @router.callback_query(F.data.startswith("audio:mode:"))
 async def audio_mode(callback: CallbackQuery) -> None:
     mode = callback.data.split(":")[-1]
+    log_handler_entry("audio_mode", callback.from_user.id, payload=callback.data, mode=mode)
     async with async_session_factory() as session:
         user = await get_or_create_user(
             session,
@@ -340,23 +359,27 @@ async def audio_mode(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("audio:transcribe:"))
 async def audio_transcribe(callback: CallbackQuery) -> None:
     mode = callback.data.split(":")[-1]
+    log_handler_entry("audio_transcribe", callback.from_user.id, payload=callback.data, mode=mode)
     await update_draft_option(callback, Section.audio, "transcribe_mode", mode)
 
 
 @router.callback_query(F.data.startswith("audio:voice:"))
 async def audio_voice(callback: CallbackQuery) -> None:
     voice_id = int(callback.data.split(":")[-1])
+    log_handler_entry("audio_voice", callback.from_user.id, payload=callback.data, voice_id=voice_id)
     await update_draft_option(callback, Section.audio, "voice_id", voice_id)
 
 
 @router.callback_query(F.data.startswith("three_d:quality:"))
 async def three_d_quality(callback: CallbackQuery) -> None:
     quality = callback.data.split(":")[-1]
+    log_handler_entry("three_d_quality", callback.from_user.id, payload=callback.data, quality=quality)
     await update_draft_option(callback, Section.three_d, "quality", quality)
 
 
 @router.callback_query(F.data == "action:start")
 async def action_start(callback: CallbackQuery) -> None:
+    log_handler_entry("action_start", callback.from_user.id, payload=callback.data)
     async with async_session_factory() as session:
         user = await get_or_create_user(
             session,
@@ -397,6 +420,7 @@ async def action_start(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "jobs:list")
 async def jobs_list(callback: CallbackQuery) -> None:
+    log_handler_entry("jobs_list", callback.from_user.id, payload=callback.data)
     async with async_session_factory() as session:
         user = await get_or_create_user(
             session,
@@ -426,6 +450,7 @@ async def jobs_list(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("balance:topup:"))
 async def balance_topup(callback: CallbackQuery) -> None:
     amount = int(callback.data.split(":")[-1])
+    log_handler_entry("balance_topup", callback.from_user.id, payload=callback.data, amount=amount)
     client = PaymentsClient()
     link = await client.create_payment(amount, "Пополнение баланса", "https://t.me/")
     await callback.message.edit_text(
@@ -438,6 +463,7 @@ async def balance_topup(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("jobs:repeat:"))
 async def jobs_repeat(callback: CallbackQuery) -> None:
     job_id = int(callback.data.split(":")[-1])
+    log_handler_entry("jobs_repeat", callback.from_user.id, payload=callback.data, job_id=job_id)
     async with async_session_factory() as session:
         result = await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
         user = result.scalar_one_or_none()
@@ -455,6 +481,7 @@ async def jobs_repeat(callback: CallbackQuery) -> None:
 
 
 async def update_draft_option(callback: CallbackQuery, section: Section, key: str, value: object) -> None:
+    log_handler_entry("update_draft_option", callback.from_user.id, payload=callback.data, section=section.value, key=key)
     async with async_session_factory() as session:
         user = await get_or_create_user(
             session,
@@ -529,11 +556,13 @@ async def calculate_price(session: AsyncSession, user: User, draft: Draft) -> in
 
 @router.callback_query(F.data == "noop")
 async def noop(callback: CallbackQuery) -> None:
+    log_handler_entry("noop", callback.from_user.id, payload=callback.data)
     await callback.answer()
 
 
 @router.callback_query(F.data == "text:summarize")
 async def text_summarize(callback: CallbackQuery) -> None:
+    log_handler_entry("text_summarize", callback.from_user.id, payload=callback.data)
     async with async_session_factory() as session:
         result = await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
         user = result.scalar_one_or_none()
@@ -556,6 +585,7 @@ async def text_summarize(callback: CallbackQuery) -> None:
 
 @router.message(F.text.startswith("/price"))
 async def admin_price(message: Message) -> None:
+    log_handler_entry("admin_price", message.from_user.id, payload=message.text)
     async with async_session_factory() as session:
         await get_or_create_user(
             session,
@@ -590,6 +620,7 @@ async def admin_price(message: Message) -> None:
 
 @router.message(F.text.startswith("/give"))
 async def admin_give(message: Message) -> None:
+    log_handler_entry("admin_give", message.from_user.id, payload=message.text)
     if message.from_user.id not in settings.admin_id_set():
         await message.answer("Недостаточно прав.")
         return
@@ -611,6 +642,7 @@ async def admin_give(message: Message) -> None:
 
 @router.message(F.text.startswith("/ban"))
 async def admin_ban(message: Message) -> None:
+    log_handler_entry("admin_ban", message.from_user.id, payload=message.text)
     if message.from_user.id not in settings.admin_id_set():
         await message.answer("Недостаточно прав.")
         return
@@ -632,6 +664,7 @@ async def admin_ban(message: Message) -> None:
 
 @router.message(F.text.startswith("/unban"))
 async def admin_unban(message: Message) -> None:
+    log_handler_entry("admin_unban", message.from_user.id, payload=message.text)
     if message.from_user.id not in settings.admin_id_set():
         await message.answer("Недостаточно прав.")
         return
@@ -653,6 +686,7 @@ async def admin_unban(message: Message) -> None:
 
 @router.message(F.text.startswith("/jobs"))
 async def admin_jobs(message: Message) -> None:
+    log_handler_entry("admin_jobs", message.from_user.id, payload=message.text)
     if message.from_user.id not in settings.admin_id_set():
         await message.answer("Недостаточно прав.")
         return
@@ -668,6 +702,7 @@ async def admin_jobs(message: Message) -> None:
 
 @router.message(F.text.startswith("/broadcast"))
 async def admin_broadcast(message: Message) -> None:
+    log_handler_entry("admin_broadcast", message.from_user.id, payload=message.text)
     if message.from_user.id not in settings.admin_id_set():
         await message.answer("Недостаточно прав.")
         return
