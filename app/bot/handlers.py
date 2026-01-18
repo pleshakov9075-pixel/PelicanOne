@@ -4,6 +4,7 @@ from aiogram import F, Router
 from aiogram.enums import ContentType
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, Message
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog import get_logger
@@ -12,9 +13,7 @@ from app.bot import keyboards
 from app.config import settings
 from app.crud import (
     add_balance,
-    charge_balance,
     clear_draft,
-    create_job_if_not_exists,
     get_or_create_draft,
     get_or_create_user,
     get_price,
@@ -37,8 +36,9 @@ from app.pricing import (
     calc_video_upscale,
 )
 from app.services.payments import PaymentsClient
+from app.services.tasks_api import TasksAPIClient
 from app.text_utils import split_text, summarize_placeholder
-from app.worker.queue import enqueue_broadcast, enqueue_job
+from app.worker.queue import enqueue_broadcast
 
 logger = get_logger()
 router = Router()
@@ -110,6 +110,70 @@ def draft_ready(draft: Draft) -> bool:
     if draft.section == Section.three_d:
         return bool(payload.get("file_id")) and bool(payload.get("quality"))
     return True
+
+
+def missing_draft_message(draft: Draft) -> str:
+    payload = draft.payload or {}
+    if draft.section == Section.text:
+        return "Добавьте текст запроса."
+    if draft.section == Section.image:
+        if payload.get("mode") == "upscale":
+            return "Прикрепите изображение и выберите апскейл."
+        return "Добавьте текст запроса."
+    if draft.section == Section.video:
+        if payload.get("mode") == "upscale":
+            return "Прикрепите видео и выберите апскейл."
+        return "Добавьте текст запроса."
+    if draft.section == Section.audio:
+        mode = payload.get("mode", "music")
+        if mode == "transcribe":
+            return "Прикрепите аудио и выберите формат."
+        if mode == "tts":
+            return "Добавьте текст и выберите голос."
+        return "Добавьте текст запроса."
+    if draft.section == Section.three_d:
+        return "Прикрепите изображение и выберите качество."
+    return "Добавьте параметры."
+
+
+def split_payload_and_options(draft: Draft) -> tuple[dict, dict]:
+    payload = draft.payload or {}
+    if draft.section == Section.text:
+        return {"prompt": payload.get("prompt")}, {}
+    if draft.section == Section.image:
+        content = {"prompt": payload.get("prompt"), "file_id": payload.get("file_id")}
+        options = {
+            "mode": payload.get("mode"),
+            "size": payload.get("size"),
+            "quality": payload.get("quality"),
+            "upscale": payload.get("upscale"),
+            "megapixels": payload.get("megapixels"),
+        }
+        return content, {k: v for k, v in options.items() if v is not None}
+    if draft.section == Section.video:
+        content = {"prompt": payload.get("prompt"), "file_id": payload.get("file_id")}
+        options = {
+            "mode": payload.get("mode"),
+            "size": payload.get("size"),
+            "duration": payload.get("duration"),
+            "with_audio": payload.get("with_audio"),
+            "upscale": payload.get("upscale"),
+            "megapixels": payload.get("megapixels"),
+        }
+        return content, {k: v for k, v in options.items() if v is not None}
+    if draft.section == Section.audio:
+        content = {"prompt": payload.get("prompt"), "file_id": payload.get("file_id")}
+        options = {
+            "mode": payload.get("mode"),
+            "transcribe_mode": payload.get("transcribe_mode"),
+            "voice_id": payload.get("voice_id"),
+        }
+        return content, {k: v for k, v in options.items() if v is not None}
+    if draft.section == Section.three_d:
+        content = {"file_id": payload.get("file_id")}
+        options = {"quality": payload.get("quality")}
+        return content, {k: v for k, v in options.items() if v is not None}
+    return payload, {}
 
 
 @router.message(F.text == "/start")
@@ -389,10 +453,10 @@ async def action_start(callback: CallbackQuery) -> None:
         )
         draft = await find_active_draft(session, user.id)
         if not draft:
-            await callback.answer("Сначала укажите параметры.")
+            await callback.answer("Сначала укажите параметры.", show_alert=True)
             return
         if not draft_ready(draft):
-            await callback.answer("Не хватает данных для запуска.")
+            await callback.answer(missing_draft_message(draft), show_alert=True)
             return
         price_rub = await calculate_price(session, user, draft)
         if user.balance_rub < price_rub:
@@ -402,19 +466,55 @@ async def action_start(callback: CallbackQuery) -> None:
             )
             await callback.answer()
             return
-        payload = draft.payload.copy()
-        await charge_balance(session, user, price_rub, "job_start")
-        updated_balance = user.balance_rub
-        job = await create_job_if_not_exists(session, user.id, draft, draft.section, price_rub, payload)
+        task_payload, options = split_payload_and_options(draft)
+        logger.info(
+            "action_start_request",
+            user_id=user.id,
+            section=draft.section.value,
+        )
+        client = TasksAPIClient()
+        try:
+            response = await client.create_task(
+                {
+                    "section": draft.section.value,
+                    "payload": task_payload,
+                    "options": options,
+                    "user_id": user.id,
+                    "telegram_id": user.telegram_id,
+                    "price_rub": price_rub,
+                }
+            )
+        except httpx.HTTPStatusError as exc:
+            logger.exception(
+                "action_start_failed",
+                status_code=exc.response.status_code,
+                response_text=exc.response.text,
+            )
+            await callback.answer("Не удалось создать задачу. Попробуйте позже.", show_alert=True)
+            return
+        except httpx.HTTPError:
+            logger.exception("action_start_failed")
+            await callback.answer("Не удалось создать задачу. Попробуйте позже.", show_alert=True)
+            return
         await clear_draft(session, draft)
-        enqueue_job(job.id)
+        updated_balance = user.balance_rub - price_rub
+        task_id = response.get("task_id")
+        job_id = response.get("job_id")
+        logger.info(
+            "action_start_success",
+            user_id=user.id,
+            section=draft.section.value,
+            task_id=task_id,
+            job_id=job_id,
+        )
     try:
         await callback.message.edit_text(
-            f"{section_title(job.section)}\n\n{render_price_block(price_rub, updated_balance)}\n\n⏳ Запускаю…",
+            f"{section_title(draft.section)}\n\n{render_price_block(price_rub, updated_balance)}\n\n"
+            f"✅ Задача создана: #{task_id}\njob_id: {job_id}",
             reply_markup=keyboards.confirm_buttons(False),
         )
     except TelegramBadRequest:
-        await callback.message.answer("⏳ Запускаю…")
+        await callback.message.answer(f"✅ Задача создана: #{task_id}\njob_id: {job_id}")
     await callback.answer()
 
 
@@ -475,9 +575,32 @@ async def jobs_repeat(callback: CallbackQuery) -> None:
         if user.balance_rub < price_rub:
             await callback.answer("Недостаточно баланса.")
             return
-        new_job = await create_job_if_not_exists(session, user.id, None, job.section, price_rub, job.payload)
-        enqueue_job(new_job.id)
-    await callback.answer("Повтор отправлен.")
+        logger.info("jobs_repeat_request", user_id=user.id, section=job.section.value, job_id=job.id)
+        client = TasksAPIClient()
+        try:
+            response = await client.create_task(
+                {
+                    "section": job.section.value,
+                    "payload": job.payload,
+                    "options": {},
+                    "user_id": user.id,
+                    "telegram_id": user.telegram_id,
+                    "price_rub": price_rub,
+                }
+            )
+        except httpx.HTTPStatusError as exc:
+            logger.exception(
+                "jobs_repeat_failed",
+                status_code=exc.response.status_code,
+                response_text=exc.response.text,
+            )
+            await callback.answer("Не удалось повторить.", show_alert=True)
+            return
+        except httpx.HTTPError:
+            logger.exception("jobs_repeat_failed")
+            await callback.answer("Не удалось повторить.", show_alert=True)
+            return
+    await callback.answer(f"Повтор отправлен. Задача #{response.get('task_id')}")
 
 
 async def update_draft_option(callback: CallbackQuery, section: Section, key: str, value: object) -> None:

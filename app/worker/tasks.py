@@ -53,6 +53,10 @@ def process_job(job_id: int) -> None:
     asyncio.run(_process(job_id))
 
 
+def execute_task(job_id: int) -> None:
+    process_job(job_id)
+
+
 async def _broadcast(message: str) -> None:
     async with async_session_factory() as session:
         result = await session.execute(select(User).where(User.is_active.is_(True)))

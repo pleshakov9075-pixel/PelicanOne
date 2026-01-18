@@ -30,6 +30,15 @@ docker compose exec postgres psql -U postgres -d pelican -c "select count(*) fro
 curl -sS -i http://127.0.0.1:8000/docs
 ```
 
+### Проверка очереди после action_start
+
+```bash
+docker compose logs -n 200 api
+docker compose logs -n 200 worker
+docker compose exec redis redis-cli -n 0 KEYS "rq:queue:*"
+docker compose exec redis redis-cli -n 0 KEYS "rq:job:*" | head
+```
+
 ## Systemd автозапуск
 
 ```bash
