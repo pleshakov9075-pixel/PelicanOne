@@ -21,9 +21,15 @@ services:
     env_file: .env
     volumes:
       - ./data:/data
+    restart: unless-stopped
     depends_on:
       - postgres
       - redis
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import redis; redis.Redis.from_url('${REDIS_URL:-redis://redis:6379}').ping()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   api:
     build: .
@@ -31,9 +37,15 @@ services:
     env_file: .env
     ports:
       - "8000:8000"
+    restart: unless-stopped
     depends_on:
       - postgres
       - redis
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   worker:
     build: .
@@ -41,9 +53,15 @@ services:
     env_file: .env
     volumes:
       - ./data:/data
+    restart: unless-stopped
     depends_on:
       - postgres
       - redis
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import redis; redis.Redis.from_url('${REDIS_URL:-redis://redis:6379}').ping()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   migrations:
     build: .

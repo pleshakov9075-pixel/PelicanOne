@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 from structlog import get_logger
 
-from app.models import Draft, Job, JobStatus, LedgerEntry, Price, Section, User
+from app.models import BalanceTransaction, Draft, Job, JobStatus, LedgerEntry, Price, Section, User
 
 logger = get_logger()
 
@@ -78,6 +78,7 @@ async def create_job_if_not_exists(
     section: Section,
     price_rub: int,
     payload: dict,
+    idempotency_key: str | None = None,
 ) -> Job:
     try:
         if draft:
@@ -85,13 +86,29 @@ async def create_job_if_not_exists(
             job = result.scalar_one_or_none()
             if job:
                 return job
-        job = Job(user_id=user_id, draft_id=draft.id if draft else None, section=section, price_rub=price_rub, payload=payload)
+        job = Job(
+            user_id=user_id,
+            draft_id=draft.id if draft else None,
+            section=section,
+            price_rub=price_rub,
+            payload=payload,
+            idempotency_key=idempotency_key,
+        )
         session.add(job)
         await session.commit()
         await session.refresh(job)
         return job
     except SQLAlchemyError:
         _log_db_error("create_job_if_not_exists", user_id=user_id, section=section.value)
+        raise
+
+
+async def get_job_by_idempotency_key(session: AsyncSession, idempotency_key: str) -> Job | None:
+    try:
+        result = await session.execute(select(Job).where(Job.idempotency_key == idempotency_key))
+        return result.scalar_one_or_none()
+    except SQLAlchemyError:
+        _log_db_error("get_job_by_idempotency_key", idempotency_key=idempotency_key)
         raise
 
 
@@ -106,6 +123,16 @@ async def update_job_status(session: AsyncSession, job_id: int, status: JobStatu
         await session.commit()
     except SQLAlchemyError:
         _log_db_error("update_job_status", job_id=job_id, status=status.value)
+        raise
+
+
+async def update_job_delivery_failure(session: AsyncSession, job_id: int, delivery_failed: bool) -> None:
+    try:
+        stmt = update(Job).where(Job.id == job_id).values(delivery_failed=delivery_failed)
+        await session.execute(stmt)
+        await session.commit()
+    except SQLAlchemyError:
+        _log_db_error("update_job_delivery_failure", job_id=job_id, delivery_failed=delivery_failed)
         raise
 
 
@@ -159,6 +186,17 @@ async def add_balance(session: AsyncSession, user: User, amount: int, reason: st
         await session.commit()
     except SQLAlchemyError:
         _log_db_error("add_balance", user_id=user.id, amount=amount, reason=reason)
+        raise
+
+
+async def add_balance_transaction(session: AsyncSession, user: User, amount: int, created_by: int, comment: str | None) -> None:
+    try:
+        user.balance_rub += amount
+        session.add(BalanceTransaction(user_id=user.id, amount_rub=amount, created_by=created_by, comment=comment))
+        session.add(LedgerEntry(user_id=user.id, amount_rub=amount, reason="admin_topup"))
+        await session.commit()
+    except SQLAlchemyError:
+        _log_db_error("add_balance_transaction", user_id=user.id, amount=amount, created_by=created_by)
         raise
 
 

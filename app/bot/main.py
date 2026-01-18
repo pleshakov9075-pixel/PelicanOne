@@ -3,7 +3,7 @@ import asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.redis import RedisStorage
 from structlog import get_logger
 
 from app.bot.handlers import router
@@ -13,7 +13,7 @@ logger = get_logger()
 
 
 def create_dispatcher() -> Dispatcher:
-    dp = Dispatcher(storage=MemoryStorage())
+    dp = Dispatcher(storage=RedisStorage.from_url(settings.redis_url))
     dp.include_router(router)
     return dp
 
@@ -24,7 +24,12 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = create_dispatcher()
-    await dp.start_polling(bot)
+    while True:
+        try:
+            await dp.start_polling(bot)
+        except Exception:
+            logger.exception("polling_failed")
+            await asyncio.sleep(2)
 
 
 if __name__ == "__main__":
