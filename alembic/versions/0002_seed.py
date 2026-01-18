@@ -24,7 +24,6 @@ def upgrade() -> None:
         sa.column("cost_rub", sa.Numeric),
         sa.column("price_rub", sa.Numeric),
         sa.column("is_active", sa.Boolean),
-        sa.column("created_at", sa.DateTime),
         sa.column("updated_at", sa.DateTime),
     )
     voices_table = sa.table(
@@ -45,7 +44,6 @@ def upgrade() -> None:
                 "cost_rub": 0.5,
                 "price_rub": 1.5,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -54,7 +52,6 @@ def upgrade() -> None:
                 "cost_rub": 0.125,
                 "price_rub": 0.375,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -63,7 +60,6 @@ def upgrade() -> None:
                 "cost_rub": 2.25,
                 "price_rub": 6.75,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -72,7 +68,6 @@ def upgrade() -> None:
                 "cost_rub": 8.5,
                 "price_rub": 25.5,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -81,7 +76,6 @@ def upgrade() -> None:
                 "cost_rub": 33.25,
                 "price_rub": 99.75,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -90,7 +84,6 @@ def upgrade() -> None:
                 "cost_rub": 3.25,
                 "price_rub": 9.75,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -99,7 +92,6 @@ def upgrade() -> None:
                 "cost_rub": 12.75,
                 "price_rub": 38.25,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -108,7 +100,6 @@ def upgrade() -> None:
                 "cost_rub": 50.0,
                 "price_rub": 150.0,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -117,7 +108,6 @@ def upgrade() -> None:
                 "cost_rub": 3.25,
                 "price_rub": 9.75,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -126,7 +116,6 @@ def upgrade() -> None:
                 "cost_rub": 12.5,
                 "price_rub": 37.5,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -135,7 +124,6 @@ def upgrade() -> None:
                 "cost_rub": 49.75,
                 "price_rub": 149.25,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -144,7 +132,6 @@ def upgrade() -> None:
                 "cost_rub": 0.25,
                 "price_rub": 1.25,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -153,7 +140,6 @@ def upgrade() -> None:
                 "cost_rub": 17.5,
                 "price_rub": 52.5,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -162,7 +148,6 @@ def upgrade() -> None:
                 "cost_rub": 35.0,
                 "price_rub": 105.0,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -171,7 +156,6 @@ def upgrade() -> None:
                 "cost_rub": 3.75,
                 "price_rub": 18.75,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -180,7 +164,6 @@ def upgrade() -> None:
                 "cost_rub": 17.0,
                 "price_rub": 51.0,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -189,7 +172,6 @@ def upgrade() -> None:
                 "cost_rub": 25.0,
                 "price_rub": 75.0,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -198,7 +180,6 @@ def upgrade() -> None:
                 "cost_rub": 10.0,
                 "price_rub": 30.0,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -207,7 +188,6 @@ def upgrade() -> None:
                 "cost_rub": 12.0,
                 "price_rub": 36.0,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -216,7 +196,6 @@ def upgrade() -> None:
                 "cost_rub": 62.5,
                 "price_rub": 187.5,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -225,7 +204,6 @@ def upgrade() -> None:
                 "cost_rub": 75.0,
                 "price_rub": 225.0,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
             {
@@ -234,7 +212,6 @@ def upgrade() -> None:
                 "cost_rub": 87.5,
                 "price_rub": 262.5,
                 "is_active": True,
-                "created_at": now,
                 "updated_at": now,
             },
         ],
