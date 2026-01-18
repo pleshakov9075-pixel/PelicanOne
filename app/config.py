@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     redis_url: str = Field(alias="REDIS_URL")
     genapi_base_url: str = Field(alias="GENAPI_BASE_URL")
     genapi_token: str = Field(alias="GENAPI_TOKEN")
+    api_public_base_url: str = Field(
+        alias="API_PUBLIC_BASE_URL",
+        default="http://localhost:8000",
+    )
     yookassa_shop_id: str = Field(alias="YOOKASSA_SHOP_ID")
     yookassa_secret_key: str = Field(alias="YOOKASSA_SECRET_KEY")
     admin_ids: str = Field(alias="ADMIN_IDS", default="")
