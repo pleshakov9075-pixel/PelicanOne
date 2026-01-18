@@ -10,7 +10,7 @@ from aiogram.types import (
 def main_reply_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🏠 Главное меню"), KeyboardButton(text="💰 Баланс")],
+            [KeyboardButton(text="🏠 Меню"), KeyboardButton(text="💰 Баланс")],
             [KeyboardButton(text="📦 Мои задачи"), KeyboardButton(text="⬅️ Назад")],
             [KeyboardButton(text="❌ Отмена")],
         ],
@@ -31,7 +31,7 @@ def main_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🎧 Аудио", callback_data="section:audio")],
         [InlineKeyboardButton(text="🧊 3D", callback_data="section:three_d")],
         [InlineKeyboardButton(text="💳 Баланс", callback_data="section:balance")],
-        [InlineKeyboardButton(text="📋 Мои задачи", callback_data="jobs:list")],
+        [InlineKeyboardButton(text="📦 Мои задачи", callback_data="jobs:list")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -42,7 +42,8 @@ def back_menu() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
                 InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
-            ]
+            ],
+            [InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home")],
         ]
     )
 
@@ -51,7 +52,7 @@ def back_and_home() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:home")],
+            [InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home")],
             [InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel")],
         ]
     )
@@ -66,6 +67,7 @@ def balance_options() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
                 InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
             ],
+            [InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home")],
         ]
     )
 
@@ -82,6 +84,7 @@ def confirm_buttons(ready: bool) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
                 InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
             ],
+            [InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home")],
         ]
     )
 
@@ -98,6 +101,7 @@ def review_buttons(ready: bool) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
                 InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
             ],
+            [InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home")],
         ]
     )
 
@@ -110,6 +114,7 @@ def text_options() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
                 InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
             ],
+            [InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home")],
         ]
     )
 
@@ -164,6 +169,7 @@ def image_options(size: str | None, quality: str | None, show_start: bool = True
     ]
     if show_start:
         rows.insert(-1, [InlineKeyboardButton(text="✅ Подтвердить", callback_data="action:confirm")])
+    rows.append([InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -178,6 +184,7 @@ def image_upscale_options(selected: int | None = None, show_start: bool = True) 
     ]
     if show_start:
         rows.insert(-1, [InlineKeyboardButton(text="✅ Подтвердить", callback_data="action:confirm")])
+    rows.append([InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -225,6 +232,7 @@ def video_options(
     ]
     if show_start:
         rows.insert(-1, [InlineKeyboardButton(text="✅ Подтвердить", callback_data="action:confirm")])
+    rows.append([InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -239,6 +247,7 @@ def video_upscale_options(selected: int | None = None, show_start: bool = True) 
     ]
     if show_start:
         rows.insert(-1, [InlineKeyboardButton(text="✅ Подтвердить", callback_data="action:confirm")])
+    rows.append([InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -258,6 +267,7 @@ def audio_options(selected_mode: str | None = None) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
                 InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
             ],
+            [InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home")],
         ]
     )
 
@@ -278,6 +288,7 @@ def audio_transcribe_options(selected: str | None = None) -> InlineKeyboardMarku
                 InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
                 InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
             ],
+            [InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home")],
         ]
     )
 
@@ -297,6 +308,7 @@ def audio_tts_options(voices: list[tuple[int, str]], selected_voice_id: int | No
         InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
         InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
     ])
+    rows.append([InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -312,6 +324,7 @@ def three_d_options(selected: str | None = None, show_start: bool = True) -> Inl
     ]
     if show_start:
         rows.insert(-1, [InlineKeyboardButton(text="✅ Подтвердить", callback_data="action:confirm")])
+    rows.append([InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -321,6 +334,7 @@ def job_list_buttons(job_ids: list[int]) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
         InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
     ])
+    rows.append([InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -332,6 +346,7 @@ def job_detail_buttons(job_id: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
                 InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
             ],
+            [InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home")],
         ]
     )
 
@@ -341,6 +356,7 @@ def summarize_button() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="Сделать кратко", callback_data="text:summarize")],
             [InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel")],
+            [InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home")],
         ]
     )
 
@@ -353,6 +369,7 @@ def retry_task_button(task_id: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
                 InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
             ],
+            [InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home")],
         ]
     )
 
@@ -365,6 +382,7 @@ def retry_create_button() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="⬅️ Назад", callback_data="back:menu"),
                 InlineKeyboardButton(text="❌ Отмена", callback_data="action:cancel"),
             ],
+            [InlineKeyboardButton(text="🏠 Меню", callback_data="menu:home")],
         ]
     )
 
